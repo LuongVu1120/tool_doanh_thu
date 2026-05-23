@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+build/
+
+# Environment variables - NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# Debug
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+
+# Sample data files (contain real business data)
+samples/
+
+# Temp Excel lock files
+~$*.xlsx
+~$*.xls
