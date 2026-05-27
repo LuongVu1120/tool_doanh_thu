@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import type { Json } from '@/types/database'
 
 interface RouteContext {
   params: Promise<{ importId: string }>
@@ -10,6 +11,8 @@ interface RouteContext {
 interface Resolution {
   action: 'include' | 'exclude'
   employeeId?: string
+  employeeName?: string
+  amount?: number
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -37,17 +40,36 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const updates: Promise<unknown>[] = []
 
     for (const [orderCode, resolution] of Object.entries(resolutions)) {
-      if (resolution.action === 'include' && resolution.employeeId) {
+      if (resolution.action === 'include') {
         updates.push(
           Promise.resolve(
             supabase
               .from('orders')
-              .update({ employee_id: resolution.employeeId })
+              .update({
+                employee_id: resolution.employeeId ?? null,
+                employee_name: resolution.employeeName ?? undefined,
+                recognized_amount: resolution.amount ?? undefined,
+                review_status: 'included',
+                review_resolution: resolution as unknown as Json,
+              })
               .eq('order_code', orderCode)
           )
         )
       }
-      // 'exclude' action: just leave employee_id null — handled by reporting layer
+      if (resolution.action === 'exclude') {
+        updates.push(
+          Promise.resolve(
+            supabase
+              .from('orders')
+              .update({
+                recognized_amount: 0,
+                review_status: 'excluded',
+                review_resolution: resolution as unknown as Json,
+              })
+              .eq('order_code', orderCode)
+          )
+        )
+      }
     }
 
     await Promise.all(updates)

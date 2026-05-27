@@ -83,7 +83,7 @@ export function mapOrderTags(
         effectiveAmount = exchange.extraAmount
       } else if (exchange.exchangeType === 'needs_review') {
         exchangeStatus = 'needs_review'
-        effectiveAmount = order.totalAmount
+        effectiveAmount = 0
       }
     }
 

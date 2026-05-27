@@ -75,9 +75,9 @@ export function extractChannelTags(tags: string[]): string[] {
  * 3. Tags does NOT contain "Bán trực tiếp"
  * 4. Nguồn != "POS"
  *
- * NOTE: No period date filter here — ALL completed orders from the file are stored.
- * Period-based filtering happens at query time (dashboard) via completed_at range.
- * This enables seed uploads (7-month chua_loc.xlsx) and correct return matching.
+ * NOTE: No period date filter here. Period-based filtering happens at query
+ * time via completion_date range. Revenue recognition requires a real
+ * completion date; order date is stored separately by the upload layer.
  */
 export function filterOrders(rows: SapoRawRow[]): FilterResult {
   const reasons: Record<string, number> = {
@@ -126,9 +126,9 @@ export function filterOrders(rows: SapoRawRow[]): FilterResult {
     const tags = parseTags(row.tags)
     const orderDate = parseSapoDate(row.orderDate || '')
 
-    // Rule 4: Must have a valid date (completion date preferred, fallback to order date)
-    // Sapo sometimes leaves "Ngày hoàn thành" empty for old orders — use "Ngày đặt hàng" instead
-    const completedAt = parseSapoDate(row.completedAt || '') ?? orderDate
+    // Rule 4: Must have a valid completion date. The accounting PDF requires
+    // "Ngày hoàn thành"; do not fall back to "Ngày đặt hàng" for revenue.
+    const completedAt = parseSapoDate(row.completedAt || '')
     if (!completedAt) {
       reasons.no_date++
       continue

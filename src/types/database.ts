@@ -111,6 +111,11 @@ export interface Database {
           completion_date: string | null
           order_date: string | null
           total_amount: number
+          original_amount: number | null
+          recognized_amount: number | null
+          exchange_type: 'none' | 'no_extra' | 'with_extra' | 'needs_review'
+          review_status: 'none' | 'pending' | 'included' | 'excluded'
+          review_resolution: Json | null
           raw_tags: string | null
           notes: string | null
           is_returned: boolean
@@ -131,6 +136,11 @@ export interface Database {
           completion_date?: string | null
           order_date?: string | null
           total_amount?: number
+          original_amount?: number | null
+          recognized_amount?: number | null
+          exchange_type?: 'none' | 'no_extra' | 'with_extra' | 'needs_review'
+          review_status?: 'none' | 'pending' | 'included' | 'excluded'
+          review_resolution?: Json | null
           raw_tags?: string | null
           notes?: string | null
           is_returned?: boolean
@@ -150,6 +160,11 @@ export interface Database {
           completion_date?: string | null
           order_date?: string | null
           total_amount?: number
+          original_amount?: number | null
+          recognized_amount?: number | null
+          exchange_type?: 'none' | 'no_extra' | 'with_extra' | 'needs_review'
+          review_status?: 'none' | 'pending' | 'included' | 'excluded'
+          review_resolution?: Json | null
           raw_tags?: string | null
           notes?: string | null
           is_returned?: boolean
@@ -195,6 +210,41 @@ export interface Database {
           orders_upserted?: number
           orders_new?: number
           orders_status_changed?: number
+        }
+      }
+      revenue_adjustments: {
+        Row: {
+          id: string
+          period: string
+          employee_name: string
+          channel_group: string
+          channel_name: string
+          amount: number
+          reason: string | null
+          source_label: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          period: string
+          employee_name: string
+          channel_group: string
+          channel_name: string
+          amount?: number
+          reason?: string | null
+          source_label?: string | null
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          period?: string
+          employee_name?: string
+          channel_group?: string
+          channel_name?: string
+          amount?: number
+          reason?: string | null
+          source_label?: string | null
         }
       }
       return_imports: {
@@ -350,6 +400,7 @@ export type MappingImportRow = Database['public']['Tables']['mapping_imports']['
 export type ChannelTagRow = Database['public']['Tables']['channel_tags']['Row']
 export type OrderRow = Database['public']['Tables']['orders']['Row']
 export type RevenueImportRow = Database['public']['Tables']['revenue_imports']['Row']
+export type RevenueAdjustmentRow = Database['public']['Tables']['revenue_adjustments']['Row']
 export type ReturnImportRow = Database['public']['Tables']['return_imports']['Row']
 export type ReturnRow = Database['public']['Tables']['returns']['Row']
 export type KpiTargetRow = Database['public']['Tables']['kpi_targets']['Row']

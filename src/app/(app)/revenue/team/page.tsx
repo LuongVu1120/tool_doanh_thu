@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
   Users,
   Calendar,
@@ -34,6 +35,21 @@ interface TeamStats {
   totalOrders: number
   isLocked: boolean
   employeeStats: EmployeeStats[]
+  extraEmployeeStats?: EmployeeStats[]
+  pendingReviewCount?: number
+  reconciliation?: {
+    matched: boolean
+    expectedGrandTotal: number
+    actualGrandTotal: number
+    grandTotalDiff: number
+    diffs: Array<{
+      employeeName: string
+      expected: number
+      actual: number
+      diff: number
+    }>
+  } | null
+  mode?: 'standard' | 'pdf'
 }
 
 interface MonthlyRevenue {
@@ -45,10 +61,13 @@ interface MonthlyRevenue {
 }
 
 export default function TeamDashboardPage() {
-  const [currentPeriod, setCurrentPeriod] = useState(getCurrentPeriod())
+  const searchParams = useSearchParams()
+  const pdfMode = searchParams.get('mode') === 'pdf'
+  const [currentPeriod, setCurrentPeriod] = useState(searchParams.get('period') || getCurrentPeriod())
   const [stats, setStats] = useState<TeamStats | null>(null)
   const [history, setHistory] = useState<MonthlyRevenue[]>([])
   const [loading, setLoading] = useState(true)
+  const [importingAdjustments, setImportingAdjustments] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -59,7 +78,8 @@ export default function TeamDashboardPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/revenue/dashboard/team?period=${currentPeriod}`)
+      const modeQuery = pdfMode ? '&mode=pdf' : ''
+      const res = await fetch(`/api/revenue/dashboard/team?period=${currentPeriod}${modeQuery}`)
       if (!res.ok) throw new Error('Không thể tải dữ liệu')
       const data = await res.json()
       setStats(data.stats)
@@ -68,6 +88,25 @@ export default function TeamDashboardPage() {
       setError(e instanceof Error ? e.message : 'Lỗi không xác định')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function importGoldenAdjustments() {
+    setImportingAdjustments(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/revenue/adjustments/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useGoldenApril: true }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Không thể import adjustment PDF')
+      await loadData()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Lỗi không xác định')
+    } finally {
+      setImportingAdjustments(false)
     }
   }
 
@@ -134,6 +173,48 @@ export default function TeamDashboardPage() {
         </div>
       ) : (
         <>
+          {pdfMode && stats?.reconciliation && (
+            <div
+              className={`rounded-xl border p-4 text-sm ${
+                stats.reconciliation.matched
+                  ? 'bg-green-50 border-green-200 text-green-800 dark:bg-green-950 dark:border-green-800 dark:text-green-300'
+                  : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-300'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-semibold">
+                  {stats.reconciliation.matched
+                    ? 'Đã khớp PDF tháng 4'
+                    : 'Chưa khớp PDF tháng 4'}
+                </div>
+                {!stats.reconciliation.matched && (
+                  <button
+                    type="button"
+                    onClick={importGoldenAdjustments}
+                    disabled={importingAdjustments}
+                    className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                  >
+                    {importingAdjustments ? 'Đang import...' : 'Import adjustment PDF'}
+                  </button>
+                )}
+              </div>
+              <div className="mt-1">
+                Actual {formatCurrencyFull(stats.reconciliation.actualGrandTotal)} / Expected{' '}
+                {formatCurrencyFull(stats.reconciliation.expectedGrandTotal)}
+              </div>
+              {!stats.reconciliation.matched && stats.reconciliation.diffs.length > 0 && (
+                <div className="mt-2 text-xs">
+                  Còn lệch {stats.reconciliation.diffs.length} nhân viên. Cần import adjustment PDF hoặc resolve đơn review.
+                </div>
+              )}
+              {stats.extraEmployeeStats && stats.extraEmployeeStats.length > 0 && (
+                <div className="mt-2 text-xs">
+                  Có {stats.extraEmployeeStats.length} nhân viên ngoài danh sách PDF đang được tách riêng khỏi bảng xếp hạng.
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Summary cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">

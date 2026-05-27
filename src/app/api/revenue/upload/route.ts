@@ -2,10 +2,12 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { runPipeline } from '@/lib/sapo-parser'
+import { parseExcelBuffer, runPipeline } from '@/lib/sapo-parser'
+import { dedupeByOrderCode, parseOrderAmount, parseSapoDate } from '@/lib/sapo-parser/parse-excel'
 import { parseMappingFile } from '@/lib/sapo-parser/mapping-parser'
 import { parseReturnsFile } from '@/lib/sapo-parser/returns-parser'
 import { normalize } from '@/lib/sapo-parser/normalize'
+import type { TagMappingResult } from '@/types/sapo'
 import type { MappingLookup } from '@/lib/sapo-parser/mapping-parser'
 import type { TypedSupabaseClient } from '@/lib/supabase/types'
 
@@ -86,27 +88,62 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Lỗi tạo import record: ${importError?.message ?? 'unknown'}` }, { status: 500 })
     }
 
-    // Run pipeline (no period filter — store all completed orders from file)
+    // Run pipeline for revenue recognition, and separately persist all raw
+    // orders so later imports can update non-completed status changes.
     const pipelineResult = await runPipeline(arrayBuffer, {
-      existingOrderCodes,
+      existingOrderCodes: new Set(),
       mappingLookup,
     })
 
-    // Build order rows using ACTUAL column names from database.ts
-    const orderRows = pipelineResult.processed.map((r) => ({
-      order_code: r.order.orderCode,
-      source: r.order.source,
-      status: 'Đã hoàn thành',
-      channel_tag_matched: r.channelTag,
-      employee_name: r.employeeName,
-      employee_id: r.employeeId,
-      completion_date: `${r.order.completedAt.getFullYear()}-${String(r.order.completedAt.getMonth() + 1).padStart(2, '0')}-${String(r.order.completedAt.getDate()).padStart(2, '0')}`,
-      total_amount: r.order.totalAmount,
-      raw_tags: r.order.rawTags,
-      notes: r.order.notes,
-      first_imported_at: new Date().toISOString(),
-      last_updated_at: new Date().toISOString(),
-    }))
+    const recognizedByCode = new Map<string, TagMappingResult>(
+      pipelineResult.processed.map((r) => [r.order.orderCode, r])
+    )
+    const noExtraExchangeCodes = new Set(
+      pipelineResult.excluded
+        .filter((e) => e.reason === 'exchange_no_extra')
+        .map((e) => e.order.orderCode)
+    )
+    const rawOrders = dedupeByOrderCode(parseExcelBuffer(arrayBuffer))
+    const now = new Date().toISOString()
+
+    const orderRows = rawOrders.map((row) => {
+      const recognized = row.orderCode ? recognizedByCode.get(row.orderCode) : null
+      const totalAmount = parseOrderAmount(row.totalAmount)
+      const completedAt = parseSapoDate(row.completedAt || '')
+      const orderDate = parseSapoDate(row.orderDate || '')
+      const isNoExtraExchange = row.orderCode ? noExtraExchangeCodes.has(row.orderCode) : false
+      const exchangeType: 'none' | 'no_extra' | 'with_extra' | 'needs_review' =
+        recognized?.exchangeStatus === 'exchange_with_extra' ? 'with_extra'
+        : recognized?.exchangeStatus === 'needs_review' ? 'needs_review'
+        : isNoExtraExchange ? 'no_extra'
+        : 'none'
+      const reviewStatus: 'none' | 'pending' = exchangeType === 'needs_review' || (recognized && !recognized.employeeName)
+        ? 'pending'
+        : 'none'
+
+      return {
+        order_code: row.orderCode || '',
+        source: row.source,
+        status: row.status,
+        channel_tag_matched: recognized?.channelTag ?? null,
+        employee_name: recognized?.employeeName ?? null,
+        employee_id: recognized?.employeeId ?? null,
+        completion_date: completedAt ? formatDateOnly(completedAt) : null,
+        order_date: orderDate ? formatDateOnly(orderDate) : null,
+        total_amount: totalAmount,
+        original_amount: totalAmount,
+        recognized_amount: reviewStatus === 'pending' || isNoExtraExchange
+          ? 0
+          : recognized?.effectiveAmount ?? 0,
+        exchange_type: exchangeType,
+        review_status: reviewStatus,
+        review_resolution: null,
+        raw_tags: row.tags || '',
+        notes: row.notes || '',
+        first_imported_at: now,
+        last_updated_at: now,
+      }
+    }).filter((row) => row.order_code)
 
     let ordersUpserted = 0
     let ordersNew = 0
@@ -121,7 +158,11 @@ export async function POST(request: NextRequest) {
         await serviceClient.from('revenue_imports')
           .update({ status: 'error', error_message: upsertError.message })
           .eq('id', importRecord.id)
-        return NextResponse.json({ error: 'Lỗi khi lưu đơn hàng' }, { status: 500 })
+        return NextResponse.json({
+          error: 'Lỗi khi lưu đơn hàng',
+          detail: upsertError.message,
+          code: upsertError.code,
+        }, { status: 500 })
       }
 
       ordersUpserted = orderRows.length
@@ -133,7 +174,7 @@ export async function POST(request: NextRequest) {
       status: 'done',
       orders_upserted: ordersUpserted,
       orders_new: ordersNew,
-      orders_status_changed: 0,
+      orders_status_changed: orderRows.filter((r) => existingOrderCodes.has(r.order_code)).length,
     }).eq('id', importRecord.id)
 
     return NextResponse.json({
@@ -146,6 +187,10 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : 'Lỗi server không xác định'
     return NextResponse.json({ error: message }, { status: 500 })
   }
+}
+
+function formatDateOnly(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 // ---------------------------------------------------------------------------

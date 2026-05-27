@@ -2,13 +2,29 @@
   "name": "huyk-tools",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "next dev",
+    "dev:web": "next dev",
+    "dev:api": "tsx apps/api/src/index.ts",
+    "dev:worker": "tsx apps/worker/src/index.ts",
     "build": "next build",
+    "build:web": "next build",
     "start": "next start",
+    "start:web": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "test:parser": "tsx scripts/test-parser.ts"
+    "type-check:api": "tsc -p apps/api/tsconfig.json --noEmit",
+    "type-check:worker": "tsc -p apps/worker/tsconfig.json --noEmit",
+    "type-check:packages": "tsc -p packages/shared/tsconfig.json --noEmit && tsc -p packages/db/tsconfig.json --noEmit",
+    "test:parser": "tsx scripts/test-parser.ts",
+    "test:revenue-golden": "tsx scripts/test-revenue-golden.ts",
+    "seed:revenue-golden": "tsx scripts/seed-golden-adjustments.ts",
+    "check:revenue-db": "tsx scripts/check-db-revenue-reconciliation.ts",
+    "clear:revenue-data": "tsx scripts/clear-revenue-data.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30",

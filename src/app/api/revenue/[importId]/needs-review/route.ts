@@ -32,11 +32,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Không tìm thấy import' }, { status: 404 })
     }
 
-    // Fetch orders that have no employee assigned (needs review)
+    // Fetch unresolved orders only. Pending exchange/unmapped orders are not
+    // counted in recognized revenue until resolved.
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('order_code, source, total_amount, notes, raw_tags, completion_date')
-      .is('employee_id', null)
+      .select('order_code, source, total_amount, recognized_amount, notes, raw_tags, completion_date, review_status')
+      .eq('review_status', 'pending')
       .order('completion_date', { ascending: false })
 
     if (error) {
@@ -48,6 +49,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       source: o.source,
       status: 'Đã hoàn thành',
       totalAmount: o.total_amount,
+      recognizedAmount: o.recognized_amount ?? 0,
       notes: o.notes || '',
       tags: o.raw_tags ? o.raw_tags.split(',').map((t: string) => t.trim()) : [],
       completedAt: o.completion_date,

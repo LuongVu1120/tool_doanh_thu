@@ -3,6 +3,15 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getPreviousPeriod, getNextPeriod, getPeriodLabel } from '@/lib/utils'
+import {
+  buildEmployeeStats,
+  buildRevenueReport,
+  reconcileWithGoldenApril2026,
+} from '@/lib/revenue/report-engine'
+import { GOLDEN_APRIL_2026_PERIOD } from '@/lib/revenue/golden-april-2026'
+
+const ORDER_SELECT = 'order_code, source, status, channel_tag_matched, employee_name, completion_date, total_amount, recognized_amount, is_returned, review_status, period_locked'
+const ADJUSTMENT_SELECT = 'period, employee_name, channel_group, channel_name, amount, reason, source_label'
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,72 +28,54 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const period = searchParams.get('period') || new Date().toISOString().slice(0, 7)
+    const mode = searchParams.get('mode')
+    const pdfMode = mode === 'pdf' && period === GOLDEN_APRIL_2026_PERIOD
 
     const periodStart = `${period}-01`
-    const periodNext  = `${getNextPeriod(period)}-01`
+    const periodNext = `${getNextPeriod(period)}-01`
 
     const { data: orders } = await supabase
       .from('orders')
-      .select('employee_name, total_amount, is_returned, period_locked')
+      .select(ORDER_SELECT)
       .gte('completion_date', periodStart)
       .lt('completion_date', periodNext)
 
-    if (!orders) {
-      return NextResponse.json({
-        stats: { totalRevenue: 0, totalOrders: 0, isLocked: false, employeeStats: [] },
-        history: [],
-      })
-    }
+    const { data: adjustments } = await supabase
+      .from('revenue_adjustments')
+      .select(ADJUSTMENT_SELECT)
+      .eq('period', period)
 
-    const validOrders = orders.filter((o) => !o.is_returned)
+    const report = buildRevenueReport(period, orders || [], adjustments || [])
+    const { employeeStats, extraEmployeeStats } = buildEmployeeStats(report, {
+      goldenPdfOnly: pdfMode,
+    })
+    const reconciliation = pdfMode ? reconcileWithGoldenApril2026(report) : null
 
-    const employeeMap = new Map<string, { revenue: number; orders: number }>()
-    for (const order of validOrders) {
-      const name = order.employee_name || 'CHƯA GÁN'
-      const existing = employeeMap.get(name) || { revenue: 0, orders: 0 }
-      employeeMap.set(name, {
-        revenue: existing.revenue + (order.total_amount || 0),
-        orders: existing.orders + 1,
-      })
-    }
-
-    const employeeStats = [...employeeMap.entries()]
-      .map(([name, stats]) => ({
-        employeeName: name,
-        name,
-        revenue: stats.revenue,
-        orders: stats.orders,
-      }))
-      .sort((a, b) => b.revenue - a.revenue)
-
-    const totalRevenue = validOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0)
-    const isLocked = orders.some((o) => o.period_locked)
-
-    // Build history (last 6 months)
     const history = []
     let p = period
     for (let i = 0; i < 6; i++) {
       const pStart = `${p}-01`
-      const pNext  = `${getNextPeriod(p)}-01`
+      const pNext = `${getNextPeriod(p)}-01`
 
       const { data: periodOrders } = await supabase
         .from('orders')
-        .select('total_amount, is_returned, period_locked')
+        .select(ORDER_SELECT)
         .gte('completion_date', pStart)
         .lt('completion_date', pNext)
 
-      const periodRevenue = (periodOrders || []).reduce((sum, o) => {
-        if (o.is_returned) return sum
-        return sum + (o.total_amount || 0)
-      }, 0)
-      const periodLocked = (periodOrders || []).some((o) => o.period_locked)
+      const { data: periodAdjustments } = await supabase
+        .from('revenue_adjustments')
+        .select(ADJUSTMENT_SELECT)
+        .eq('period', p)
+
+      const periodReport = buildRevenueReport(p, periodOrders || [], periodAdjustments || [])
 
       history.unshift({
         period: p,
         label: getPeriodLabel(p),
-        revenue: periodRevenue,
-        orders: (periodOrders || []).filter((o) => !o.is_returned).length,
-        isLocked: periodLocked,
+        revenue: periodReport.grandTotal,
+        orders: periodReport.orderCount,
+        isLocked: periodReport.isLocked,
       })
 
       p = getPreviousPeriod(p)
@@ -92,10 +83,14 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       stats: {
-        totalRevenue,
-        totalOrders: validOrders.length,
-        isLocked,
+        totalRevenue: report.grandTotal,
+        totalOrders: report.orderCount,
+        isLocked: report.isLocked,
         employeeStats,
+        extraEmployeeStats,
+        pendingReviewCount: report.pendingReviewCount,
+        reconciliation,
+        mode: pdfMode ? 'pdf' : 'standard',
       },
       history,
     })

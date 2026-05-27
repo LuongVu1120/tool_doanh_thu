@@ -3,6 +3,10 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { getPreviousPeriod, getNextPeriod, getPeriodLabel } from '@/lib/utils'
+import { buildRevenueReport, normalizeEmployeeName } from '@/lib/revenue/report-engine'
+
+const ORDER_SELECT = 'order_code, source, status, channel_tag_matched, employee_name, completion_date, total_amount, recognized_amount, is_returned, review_status, period_locked'
+const ADJUSTMENT_SELECT = 'period, employee_name, channel_group, channel_name, amount, reason, source_label'
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,11 +24,6 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const period = searchParams.get('period') || new Date().toISOString().slice(0, 7)
 
-    // Use exclusive upper bound (first day of next month) to avoid last-day timezone bugs
-    const periodStart = `${period}-01`
-    const periodNext  = `${getNextPeriod(period)}-01`
-
-    // Get user's full_name to match against orders.employee_name
     const serviceClient = await createServiceClient()
     const { data: profile } = await serviceClient
       .from('users')
@@ -32,7 +31,7 @@ export async function GET(request: NextRequest) {
       .eq('id', user.id)
       .maybeSingle()
 
-    const employeeName = profile?.full_name || null
+    const employeeName = normalizeEmployeeName(profile?.full_name)
 
     if (!employeeName) {
       return NextResponse.json({
@@ -49,17 +48,25 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    const periodStart = `${period}-01`
+    const periodNext = `${getNextPeriod(period)}-01`
+
     const { data: orders } = await supabase
       .from('orders')
-      .select('total_amount, is_returned, period_locked, completion_date')
-      .eq('employee_name', employeeName)
+      .select(ORDER_SELECT)
       .gte('completion_date', periodStart)
       .lt('completion_date', periodNext)
 
-    const validOrders = (orders || []).filter((o) => !o.is_returned)
-    const revenue = validOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0)
-    const ordersCount = validOrders.length
-    const isLocked = validOrders.some((o) => o.period_locked)
+    const { data: adjustments } = await supabase
+      .from('revenue_adjustments')
+      .select(ADJUSTMENT_SELECT)
+      .eq('period', period)
+
+    const report = buildRevenueReport(period, orders || [], adjustments || [])
+    const revenue = report.employeeTotals[employeeName] ?? 0
+    const ordersCount = report.rows
+      .filter((r) => r.source === 'orders' && r.employeeName === employeeName)
+      .reduce((sum, r) => sum + r.orderCount, 0)
 
     const { data: kpi } = await supabase
       .from('kpi_targets')
@@ -68,32 +75,33 @@ export async function GET(request: NextRequest) {
       .eq('period', period)
       .maybeSingle()
 
-    // Build history (last 6 months)
     const history = []
     let p = period
     for (let i = 0; i < 6; i++) {
       const pStart = `${p}-01`
-      const pNext  = `${getNextPeriod(p)}-01`
+      const pNext = `${getNextPeriod(p)}-01`
 
       const { data: periodOrders } = await supabase
         .from('orders')
-        .select('total_amount, is_returned, period_locked')
-        .eq('employee_name', employeeName)
+        .select(ORDER_SELECT)
         .gte('completion_date', pStart)
         .lt('completion_date', pNext)
 
-      const periodRevenue = (periodOrders || []).reduce((sum, o) => {
-        if (o.is_returned) return sum
-        return sum + (o.total_amount || 0)
-      }, 0)
-      const periodLocked = (periodOrders || []).some((o) => o.period_locked)
+      const { data: periodAdjustments } = await supabase
+        .from('revenue_adjustments')
+        .select(ADJUSTMENT_SELECT)
+        .eq('period', p)
+
+      const periodReport = buildRevenueReport(p, periodOrders || [], periodAdjustments || [])
 
       history.unshift({
         period: p,
         label: getPeriodLabel(p),
-        revenue: periodRevenue,
-        orders: (periodOrders || []).filter((o) => !o.is_returned).length,
-        isLocked: periodLocked,
+        revenue: periodReport.employeeTotals[employeeName] ?? 0,
+        orders: periodReport.rows
+          .filter((r) => r.source === 'orders' && r.employeeName === employeeName)
+          .reduce((sum, r) => sum + r.orderCount, 0),
+        isLocked: periodReport.isLocked,
       })
 
       p = getPreviousPeriod(p)
@@ -104,7 +112,7 @@ export async function GET(request: NextRequest) {
         period,
         revenue,
         orders: ordersCount,
-        isLocked,
+        isLocked: report.isLocked,
         kpiTarget: kpi?.target_amount || null,
         employeeName,
       },

@@ -13,13 +13,18 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
+    "baseUrl": ".",
     "plugins": [
       {
         "name": "next"
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@huyk/shared": ["./packages/shared/src/index.ts"],
+      "@huyk/shared/*": ["./packages/shared/src/*"],
+      "@huyk/db": ["./packages/db/src/index.ts"],
+      "@huyk/db/*": ["./packages/db/src/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

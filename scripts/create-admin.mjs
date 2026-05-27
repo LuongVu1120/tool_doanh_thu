@@ -9,8 +9,8 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
 
-// Load .env.local manually
-const envPath = path.join(ROOT, '.env.local')
+// Load .env manually
+const envPath = path.join(ROOT, '.env')
 const envContent = fs.readFileSync(envPath, 'utf-8')
 const env = {}
 for (const line of envContent.split('\n')) {
@@ -22,7 +22,7 @@ const SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL
 const SERVICE_KEY = env.SUPABASE_SERVICE_ROLE_KEY
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error('❌ Missing Supabase env vars in .env.local')
+  console.error('❌ Missing Supabase env vars in .env')
   process.exit(1)
 }
 
