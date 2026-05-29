@@ -63,15 +63,22 @@ function NavLink({
   icon: Icon,
   collapsed,
   badge,
+  match = 'prefix',
 }: {
   href: string
   label: string
   icon: React.ComponentType<{ className?: string }>
   collapsed: boolean
   badge?: string
+  match?: 'exact' | 'prefix'
 }) {
   const pathname = usePathname()
-  const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href)
+  const isActive =
+    match === 'exact'
+      ? pathname === href
+      : href === '/'
+        ? pathname === '/'
+        : pathname === href || pathname.startsWith(`${href}/`)
 
   return (
     <Link
@@ -112,8 +119,6 @@ function NavSection({
   item: NavItem
   collapsed: boolean
 }) {
-  const pathname = usePathname()
-  const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
   const hasChildren = item.children && item.children.length > 0
 
   if (!hasChildren || collapsed) {
@@ -130,14 +135,26 @@ function NavSection({
 
   return (
     <div>
-      <NavLink
-        href={item.href}
-        label={item.label}
-        icon={item.icon}
-        collapsed={collapsed}
-        badge={item.badge}
-      />
-      {isActive && !collapsed && (
+      <div
+        className={cn(
+          'flex items-center gap-3 px-3 py-2 rounded-lg text-sm',
+          'text-slate-600 dark:text-slate-400',
+          collapsed && 'justify-center px-2'
+        )}
+      >
+        <item.icon className="w-4 h-4 shrink-0" />
+        {!collapsed && (
+          <>
+            <span className="flex-1 truncate font-medium">{item.label}</span>
+            {item.badge && (
+              <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded font-medium">
+                {item.badge}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      {!collapsed && (
         <div className="ml-4 mt-1 space-y-0.5 border-l border-slate-200 dark:border-slate-700 pl-3">
           {item.children?.map((child) => (
             <NavLink
@@ -146,6 +163,7 @@ function NavSection({
               label={child.label}
               icon={child.icon}
               collapsed={false}
+              match="exact"
             />
           ))}
         </div>
