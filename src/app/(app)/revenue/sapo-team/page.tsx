@@ -1,6 +1,20 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import {
+  useSaveChannelAssignments,
+  useSaveMediaToggles,
+  useSapoChannels,
+  useSapoDashboard,
+  useSapoMembers,
+  useSapoV2Sync,
+} from '@/hooks/use-sapo-v2'
+import {
+  fetchSapoChannelContexts,
+  sapoV2Keys,
+} from '@/lib/sapo-v2/queries'
+import type { ChannelContext, ChannelView, DashboardData, MemberView } from '@/types/sapo-v2-ui'
 import {
   RefreshCw,
   TrendingUp,
@@ -50,98 +64,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 
 // ===== Types =====
-
-interface ChannelView {
-  id: string
-  alias: string
-  platform: string
-  branch_name: string | null
-  branch_external_id: string | null
-  main_name: string | null
-  sub_name: string | null
-  app_alias: string | null
-  media_member_id: number | null
-  orders_count: number
-  last_seen_at: string
-}
-
-interface ChannelContext {
-  channel_id: string
-  total_orders: number
-  top_creator_id: number | null
-  top_creator_name: string | null
-  top_creator_prefix: string | null
-  top_creator_orders: number | null
-  top_creator_is_media: boolean
-  top_media_creator_id: number | null
-  top_media_creator_name: string | null
-  top_media_creator_prefix: string | null
-  top_media_creator_orders: number | null
-  top_assignee_id: number | null
-  top_assignee_name: string | null
-  top_assignee_prefix: string | null
-  top_assignee_orders: number | null
-  top_assignee_is_media: boolean
-}
-
-interface MemberView {
-  sapo_user_id: number
-  full_name: string | null
-  email: string | null
-  prefix_code: string | null
-  is_media_team: boolean
-  is_active: boolean
-}
-
-interface DashboardData {
-  range: { from: string; to: string }
-  summary: {
-    total_orders: number
-    revenue_total: number
-    revenue_paid: number
-    revenue_received: number
-    revenue_refunded: number
-    cancelled_count: number
-  }
-  byPlatform: Array<{ platform: string; orders: number; revenue: number; paid: number }>
-  byChannel: Array<{
-    channel_id: string
-    channel_name: string
-    platform: string | null
-    orders: number
-    revenue: number
-    paid: number
-    media_member_id: number | null
-    media_member_name: string | null
-  }>
-  byMediaMember: Array<{
-    sapo_user_id: number
-    name: string
-    prefix: string | null
-    orders: number
-    revenue: number
-    paid: number
-    channels: number
-  }>
-  byCreator: Array<{
-    sapo_user_id: number
-    name: string
-    prefix: string | null
-    orders: number
-    revenue: number
-    paid: number
-  }>
-  byMonth: Array<{
-    month: string
-    orders: number
-    cancelled: number
-    revenue: number
-    paid: number
-    received: number
-    refunded: number
-    by_platform: Record<string, { orders: number; revenue: number }>
-  }>
-}
+// ChannelView, MemberView, DashboardData, ChannelContext imported from @/types/sapo-v2-ui
 
 // ===== Helpers =====
 
@@ -287,7 +210,11 @@ function getPlatformIcon(platform: string) {
 
 // ===== Component =====
 
+const EMPTY_CHANNELS: ChannelView[] = []
+const EMPTY_MEMBERS: MemberView[] = []
+
 export default function SapoTeamPage() {
+  const queryClient = useQueryClient()
   const today = useMemo(() => new Date(), [])
   const defaultFrom = useMemo(() => '2025-01-01', [])
   const defaultTo = useMemo(() => today.toISOString().slice(0, 10), [today])
@@ -296,15 +223,35 @@ export default function SapoTeamPage() {
   const [toDate, setToDate] = useState(defaultTo)
   const [tab, setTab] = useState<'overview' | 'monthly' | 'channels' | 'members'>('overview')
 
-  const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const fromIso = useMemo(() => startOfDay(new Date(fromDate)), [fromDate])
+  const toIso = useMemo(() => endOfDay(new Date(toDate)), [toDate])
+
+  const dashboardQuery = useSapoDashboard(fromIso, toIso)
+  const channelsQuery = useSapoChannels()
+  const membersQuery = useSapoMembers()
+  const syncMutation = useSapoV2Sync()
+  const saveAssignmentsMutation = useSaveChannelAssignments()
+  const saveMediaMutation = useSaveMediaToggles()
+
+  const dashboard = dashboardQuery.data ?? null
+  const channels = channelsQuery.data ?? EMPTY_CHANNELS
+  const members = membersQuery.data ?? EMPTY_MEMBERS
+
+  const loading =
+    (dashboardQuery.isLoading && !dashboardQuery.data) ||
+    (channelsQuery.isLoading && !channelsQuery.data) ||
+    (membersQuery.isLoading && !membersQuery.data)
+  const syncing = syncMutation.isPending
+  const saving = saveAssignmentsMutation.isPending || saveMediaMutation.isPending
+
+  const [actionError, setActionError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null)
-  const [channels, setChannels] = useState<ChannelView[]>([])
-  const [members, setMembers] = useState<MemberView[]>([])
+  const fetchError = dashboardQuery.error || channelsQuery.error || membersQuery.error
+  const error =
+    actionError ||
+    (fetchError instanceof Error ? fetchError.message : fetchError ? String(fetchError) : null)
+
   const [channelContexts, setChannelContexts] = useState<Record<string, ChannelContext>>({})
   const [loadingContexts, setLoadingContexts] = useState(false)
 
@@ -313,54 +260,16 @@ export default function SapoTeamPage() {
   // Pending media-team toggles (member.sapo_user_id → is_media_team)
   const [pendingMediaToggles, setPendingMediaToggles] = useState<Record<number, boolean>>({})
 
-  useEffect(() => {
-    void loadAll()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromDate, toDate])
-
-  async function loadAll() {
-    setLoading(true)
-    setError(null)
-    try {
-      const fromIso = startOfDay(new Date(fromDate))
-      const toIso = endOfDay(new Date(toDate))
-      const [dashRes, chRes, mRes] = await Promise.all([
-        fetch(`/api/sapo-v2/dashboard?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`),
-        fetch('/api/sapo-v2/channels'),
-        fetch('/api/sapo-v2/members'),
-      ])
-      const dashData = await dashRes.json()
-      const chData = await chRes.json()
-      const mData = await mRes.json()
-      if (!dashRes.ok) throw new Error(dashData.error || 'Lỗi tải dashboard')
-      if (!chRes.ok) throw new Error(chData.error || 'Lỗi tải channels')
-      if (!mRes.ok) throw new Error(mData.error || 'Lỗi tải members')
-      setDashboard(dashData)
-      setChannels(chData.channels || [])
-      setMembers(mData.members || [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Lỗi không xác định')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   async function syncNow() {
-    setSyncing(true)
-    setError(null)
+    setActionError(null)
     setMessage(null)
     try {
-      const res = await fetch('/api/sapo-v2/sync?incremental=1', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Không thể sync Sapo')
+      const data = await syncMutation.mutateAsync()
       setMessage(
         `Đã đồng bộ thành công: ${data.orders?.orders_upserted ?? 0} đơn hàng mới, phát hiện ${data.orders?.channels_discovered ?? 0} kênh bán hàng, cập nhật ${data.members?.upserted ?? 0} nhân viên.`
       )
-      await loadAll()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Lỗi không xác định')
-    } finally {
-      setSyncing(false)
+      setActionError(e instanceof Error ? e.message : 'Lỗi không xác định')
     }
   }
 
@@ -379,24 +288,14 @@ export default function SapoTeamPage() {
       media_member_id,
     }))
     if (updates.length === 0) return
-    setSaving(true)
-    setError(null)
+    setActionError(null)
     setMessage(null)
     try {
-      const res = await fetch('/api/sapo-v2/channels', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments: updates }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Lỗi cập nhật phân quyền phụ trách')
+      await saveAssignmentsMutation.mutateAsync(updates)
       setMessage(`Đã cập nhật người phụ trách thành công cho ${updates.length} kênh bán hàng.`)
       setPendingAssignments({})
-      await loadAll()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Lỗi không xác định')
-    } finally {
-      setSaving(false)
+      setActionError(e instanceof Error ? e.message : 'Lỗi không xác định')
     }
   }
 
@@ -406,24 +305,14 @@ export default function SapoTeamPage() {
       is_media_team: v,
     }))
     if (toggles.length === 0) return
-    setSaving(true)
-    setError(null)
+    setActionError(null)
     setMessage(null)
     try {
-      const res = await fetch('/api/sapo-v2/members', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toggles }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Lỗi thiết lập team Media')
+      await saveMediaMutation.mutateAsync(toggles)
       setMessage(`Đã cập nhật trạng thái thuộc đội Media cho ${toggles.length} nhân viên.`)
       setPendingMediaToggles({})
-      await loadAll()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Lỗi không xác định')
-    } finally {
-      setSaving(false)
+      setActionError(e instanceof Error ? e.message : 'Lỗi không xác định')
     }
   }
 
@@ -463,7 +352,7 @@ export default function SapoTeamPage() {
   // Tải dữ liệu context (top creator, top assignee, top Media creator) cho TẤT CẢ kênh,
   // giúp user thấy ngữ cảnh đầy đủ để gán tay hoặc bulk-assign hiệu quả.
   async function loadChannelContexts(): Promise<Record<string, ChannelContext>> {
-    setError(null)
+    setActionError(null)
 
     const memberIdsForAnalysis = Array.from(
       new Set<number>([
@@ -472,20 +361,18 @@ export default function SapoTeamPage() {
       ])
     )
     if (memberIdsForAnalysis.length === 0) {
-      setError('Chưa có nhân viên Media nào để phân tích. Hãy bấm "Tự động phát hiện đội Media" trước.')
+      setActionError('Chưa có nhân viên Media nào để phân tích. Hãy bấm "Tự động phát hiện đội Media" trước.')
       return {}
     }
 
     try {
       setLoadingContexts(true)
-      const params = new URLSearchParams({ member_ids: memberIdsForAnalysis.join(',') })
-      const res = await fetch(`/api/sapo-v2/auto-assign?${params.toString()}`)
-      const data = (await res.json()) as {
-        contexts?: ChannelContext[]
-        summary?: { total_channels: number; has_media_creator: number; no_media_creator: number }
-        error?: string
-      }
-      if (!res.ok) throw new Error(data.error || 'Không tải được context kênh')
+      const memberIdsKey = memberIdsForAnalysis.join(',')
+      const data = await queryClient.fetchQuery({
+        queryKey: sapoV2Keys.channelContexts(memberIdsKey),
+        queryFn: () => fetchSapoChannelContexts(memberIdsForAnalysis),
+        staleTime: 5 * 60 * 1000,
+      })
 
       const map: Record<string, ChannelContext> = {}
       for (const c of data.contexts || []) map[c.channel_id] = c
@@ -498,7 +385,7 @@ export default function SapoTeamPage() {
       }
       return map
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Lỗi không xác định khi tải context.')
+      setActionError(e instanceof Error ? e.message : 'Lỗi không xác định khi tải context.')
       return {}
     } finally {
       setLoadingContexts(false)
@@ -702,7 +589,7 @@ export default function SapoTeamPage() {
                 key={t.key}
                 onClick={() => {
                   setTab(t.key)
-                  setError(null)
+                  setActionError(null)
                   setMessage(null)
                 }}
                 className={

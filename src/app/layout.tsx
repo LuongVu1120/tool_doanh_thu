@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { ThemeProvider } from 'next-themes'
+import { AppProviders } from '@/components/providers/app-providers'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -21,14 +21,7 @@ export default function RootLayout({
   return (
     <html lang="vi" suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   )

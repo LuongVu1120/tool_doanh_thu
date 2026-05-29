@@ -1,82 +1,43 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { RefreshCw, CheckCircle2, AlertTriangle, Copy, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-
-interface SapoConnectionView {
-  id: string
-  store: string
-  scopes: string | null
-  last_sync_at: string | null
-  sync_cursor_modified_on: string | null
-  created_at: string | null
-  source?: 'env' | 'database'
-}
-
-interface SapoStatus {
-  connections: SapoConnectionView[]
-  migrationRequired?: boolean
-  error?: string
-  mode?: 'private_token' | 'private_app' | 'oauth'
-  configured: {
-    clientId: boolean
-    clientSecret: boolean
-    store: boolean
-    accessToken: boolean
-    apiKey: boolean
-    apiSecret: boolean
-    webhookSecret: boolean
-    cronSecret: boolean
-  }
-  webhook: {
-    url: string
-    topics: string[]
-  }
-}
+import { useSapoLegacySync, useSapoStatus } from '@/hooks/use-sapo-v2'
+import { useQueryClient } from '@tanstack/react-query'
+import { sapoKeys } from '@/lib/sapo-v2/queries'
 
 export default function SapoSettingsPage() {
-  const [status, setStatus] = useState<SapoStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
+  const queryClient = useQueryClient()
+  const statusQuery = useSapoStatus()
+  const syncMutation = useSapoLegacySync()
+
+  const status = statusQuery.data ?? null
+  const loading = statusQuery.isLoading && !statusQuery.data
+  const syncing = syncMutation.isPending
+
+  const [actionError, setActionError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadStatus()
-  }, [])
+  const fetchError = statusQuery.error
+  const error =
+    actionError ||
+    (fetchError instanceof Error ? fetchError.message : fetchError ? String(fetchError) : null)
 
-  async function loadStatus() {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/sapo/status')
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Không thể tải trạng thái Sapo')
-      setStatus(data)
-      if (data.migrationRequired && data.error) setError(data.error)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Lỗi không xác định')
-    } finally {
-      setLoading(false)
-    }
+  async function refreshStatus() {
+    setActionError(null)
+    await queryClient.invalidateQueries({ queryKey: sapoKeys.status() })
   }
 
   async function syncNow(full = false) {
-    setSyncing(true)
-    setError(null)
+    setActionError(null)
     setMessage(null)
     try {
-      const res = await fetch(`/api/sapo/sync${full ? '?full=1' : ''}`, { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Không thể sync Sapo')
+      const data = await syncMutation.mutateAsync(full)
       const total = (data.results || []).reduce((sum: number, item: { upserted: number }) => sum + item.upserted, 0)
       setMessage(`Đã sync ${total} đơn từ Sapo`)
-      await loadStatus()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Lỗi không xác định')
-    } finally {
-      setSyncing(false)
+      setActionError(e instanceof Error ? e.message : 'Lỗi không xác định')
     }
   }
 
@@ -97,6 +58,8 @@ export default function SapoSettingsPage() {
       ? 'Đã cấu hình Private Token (OAuth) trong .env'
       : 'Thêm SAPO_STORE + SAPO_API_KEY + SAPO_API_SECRET (Private App) hoặc SAPO_ACCESS_TOKEN (OAuth) vào .env'
 
+  const displayError = error || (status?.migrationRequired && status.error ? status.error : null)
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -106,15 +69,15 @@ export default function SapoSettingsPage() {
             Kéo đơn đã thanh toán về dashboard doanh thu realtime
           </p>
         </div>
-        <Button type="button" variant="outline" onClick={loadStatus} disabled={loading}>
+        <Button type="button" variant="outline" onClick={() => void refreshStatus()} disabled={loading}>
           <RefreshCw className="w-4 h-4" />
           Làm mới
         </Button>
       </div>
 
-      {error && (
+      {displayError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-          {error}
+          {displayError}
         </div>
       )}
       {message && (
@@ -148,11 +111,11 @@ export default function SapoSettingsPage() {
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Kết nối hiện tại</h2>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={() => syncNow(false)} disabled={!connected || syncing}>
+            <Button type="button" variant="outline" onClick={() => void syncNow(false)} disabled={!connected || syncing}>
               <RefreshCw className="w-4 h-4" />
               Sync ngay
             </Button>
-            <Button type="button" variant="outline" onClick={() => syncNow(true)} disabled={!connected || syncing}>
+            <Button type="button" variant="outline" onClick={() => void syncNow(true)} disabled={!connected || syncing}>
               Full sync
             </Button>
           </div>
