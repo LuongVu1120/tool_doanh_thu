@@ -1,0 +1,38 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Next.js
+.next
+out
+build
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Git & IDE
+.git
+.gitignore
+.vscode
+.idea
+.vercel
+
+# Docs & samples
+samples
+outputs
+monthly-report-*.json
+pdf-vcb-import-report.json
+*.md
+!README.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test & debug
+npm-debug.log*
+pnpm-debug.log*
+coverage
+*.tsbuildinfo
