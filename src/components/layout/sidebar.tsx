@@ -9,9 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Star,
-  Upload,
-  BarChart3,
-  Users,
   RefreshCw,
   Sparkles,
 } from 'lucide-react'
@@ -43,15 +40,12 @@ const navItems: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
-    href: '/revenue',
+    href: '/revenue/sapo-team',
     label: 'Doanh thu Media',
     icon: TrendingUp,
     badge: 'Media',
     children: [
-      { href: '/revenue/sapo-team', label: 'Sapo Team (mới)', icon: Sparkles },
-      { href: '/revenue', label: 'Dashboard cá nhân', icon: BarChart3 },
-      { href: '/revenue/team', label: 'Dashboard team', icon: Users },
-      { href: '/revenue/upload', label: 'Upload dữ liệu', icon: Upload },
+      { href: '/revenue/sapo-team', label: 'Sapo Team', icon: Sparkles },
       { href: '/revenue/sapo', label: 'Kết nối Sapo', icon: RefreshCw },
     ],
   },

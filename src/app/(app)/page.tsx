@@ -13,10 +13,10 @@ const tools = [
     id: 'revenue',
     title: 'Doanh thu Media',
     description:
-      'Upload Excel từ Sapo, phân tích doanh thu theo nhân viên, theo kênh. Dashboard cá nhân và team với biểu đồ trực quan.',
-    href: '/revenue',
+      'Theo dõi doanh thu theo nhân viên và kênh từ Sapo API. Dashboard team với phân tích theo kênh trực quan.',
+    href: '/revenue/sapo-team',
     icon: <TrendingUp className="w-5 h-5" />,
-    badges: ['Excel', 'Sapo', 'Recharts'],
+    badges: ['Sapo', 'API'],
     color: 'green' as const,
     isNew: true,
   },
@@ -95,11 +95,11 @@ export default function ToolHubPage() {
             <p className="text-blue-200 text-sm font-medium mb-1">Công cụ nổi bật</p>
             <h2 className="text-xl font-bold mb-2">Doanh thu Media</h2>
             <p className="text-blue-100 text-sm max-w-md">
-              Upload file Excel từ Sapo để tự động tính doanh thu theo nhân viên. Hỗ trợ phát hiện
-              đơn đổi hàng, mapping tag kênh và dashboard trực quan.
+              Đồng bộ đơn hàng từ Sapo API để tự động tính doanh thu theo nhân viên và phân tích
+              theo kênh trực quan trên Sapo Team dashboard.
             </p>
             <a
-              href="/revenue"
+              href="/revenue/sapo-team"
               className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-white text-blue-700 text-sm font-semibold rounded-lg hover:bg-blue-50 transition-colors"
             >
               <TrendingUp className="w-4 h-4" />
