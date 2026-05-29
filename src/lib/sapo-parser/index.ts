@@ -1,4 +1,4 @@
-import type { PipelineResult, SapoOrder, TagMappingResult } from '@/types/sapo'
+import type { PipelineResult, SapoOrder, SapoRawRow, TagMappingResult } from '@/types/sapo'
 import { parseExcelBuffer } from './parse-excel'
 import { filterOrders, extractChannelTags } from './filter-orders'
 import { deduplicateAgainstDB } from './deduplicate'
@@ -32,10 +32,20 @@ export async function runPipeline(
   buffer: ArrayBuffer,
   options: PipelineOptions
 ): Promise<PipelineResult> {
+  return runPipelineFromRows(parseExcelBuffer(buffer), options)
+}
+
+/**
+ * Run the full processing pipeline from already-normalized Sapo rows.
+ * Used by Excel import and Sapo Admin API ingestion.
+ */
+export async function runPipelineFromRows(
+  rawRows: SapoRawRow[],
+  options: PipelineOptions
+): Promise<PipelineResult> {
   const { existingOrderCodes, mappingLookup } = options
 
-  // --- Step 1: Parse Excel + Filter ---
-  const rawRows = parseExcelBuffer(buffer)
+  // --- Step 1: Filter normalized rows ---
   const filterResult = filterOrders(rawRows)
 
   const totalRows = rawRows.length

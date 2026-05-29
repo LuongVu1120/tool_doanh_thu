@@ -31,7 +31,12 @@ supabase/.temp/
 
 # Sample data files (contain real business data)
 samples/
+outputs/
+monthly-report-*.json
+pdf-vcb-import-report.json
 
 # Temp Excel lock files
 ~$*.xlsx
 ~$*.xls
+
+.vercel

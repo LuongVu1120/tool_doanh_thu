@@ -21,6 +21,7 @@ import {
   formatCurrencyFull,
   formatCurrencyShort,
 } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
 
 interface EmployeeStats {
   employeeId: string
@@ -72,6 +73,20 @@ export default function TeamDashboardPage() {
 
   useEffect(() => {
     loadData()
+  }, [currentPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`orders-dashboard-team-${currentPeriod}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        loadData()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [currentPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {

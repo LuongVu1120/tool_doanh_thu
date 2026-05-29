@@ -2,13 +2,11 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { parseExcelBuffer, runPipeline } from '@/lib/sapo-parser'
-import { dedupeByOrderCode, parseOrderAmount, parseSapoDate } from '@/lib/sapo-parser/parse-excel'
+import { parseExcelBuffer } from '@/lib/sapo-parser'
 import { parseMappingFile } from '@/lib/sapo-parser/mapping-parser'
 import { parseReturnsFile } from '@/lib/sapo-parser/returns-parser'
 import { normalize } from '@/lib/sapo-parser/normalize'
-import type { TagMappingResult } from '@/types/sapo'
-import type { MappingLookup } from '@/lib/sapo-parser/mapping-parser'
+import { buildOrderImportRows, loadActiveMappingLookup } from '@/lib/revenue/order-import'
 import type { TypedSupabaseClient } from '@/lib/supabase/types'
 
 export const maxDuration = 60
@@ -88,62 +86,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Lỗi tạo import record: ${importError?.message ?? 'unknown'}` }, { status: 500 })
     }
 
-    // Run pipeline for revenue recognition, and separately persist all raw
-    // orders so later imports can update non-completed status changes.
-    const pipelineResult = await runPipeline(arrayBuffer, {
-      existingOrderCodes: new Set(),
+    // Run revenue recognition, and persist all raw orders so later imports can
+    // update non-completed status changes.
+    const { rows: orderRows, stats } = await buildOrderImportRows(parseExcelBuffer(arrayBuffer), {
       mappingLookup,
     })
-
-    const recognizedByCode = new Map<string, TagMappingResult>(
-      pipelineResult.processed.map((r) => [r.order.orderCode, r])
-    )
-    const noExtraExchangeCodes = new Set(
-      pipelineResult.excluded
-        .filter((e) => e.reason === 'exchange_no_extra')
-        .map((e) => e.order.orderCode)
-    )
-    const rawOrders = dedupeByOrderCode(parseExcelBuffer(arrayBuffer))
-    const now = new Date().toISOString()
-
-    const orderRows = rawOrders.map((row) => {
-      const recognized = row.orderCode ? recognizedByCode.get(row.orderCode) : null
-      const totalAmount = parseOrderAmount(row.totalAmount)
-      const completedAt = parseSapoDate(row.completedAt || '')
-      const orderDate = parseSapoDate(row.orderDate || '')
-      const isNoExtraExchange = row.orderCode ? noExtraExchangeCodes.has(row.orderCode) : false
-      const exchangeType: 'none' | 'no_extra' | 'with_extra' | 'needs_review' =
-        recognized?.exchangeStatus === 'exchange_with_extra' ? 'with_extra'
-        : recognized?.exchangeStatus === 'needs_review' ? 'needs_review'
-        : isNoExtraExchange ? 'no_extra'
-        : 'none'
-      const reviewStatus: 'none' | 'pending' = exchangeType === 'needs_review' || (recognized && !recognized.employeeName)
-        ? 'pending'
-        : 'none'
-
-      return {
-        order_code: row.orderCode || '',
-        source: row.source,
-        status: row.status,
-        channel_tag_matched: recognized?.channelTag ?? null,
-        employee_name: recognized?.employeeName ?? null,
-        employee_id: recognized?.employeeId ?? null,
-        completion_date: completedAt ? formatDateOnly(completedAt) : null,
-        order_date: orderDate ? formatDateOnly(orderDate) : null,
-        total_amount: totalAmount,
-        original_amount: totalAmount,
-        recognized_amount: reviewStatus === 'pending' || isNoExtraExchange
-          ? 0
-          : recognized?.effectiveAmount ?? 0,
-        exchange_type: exchangeType,
-        review_status: reviewStatus,
-        review_resolution: null,
-        raw_tags: row.tags || '',
-        notes: row.notes || '',
-        first_imported_at: now,
-        last_updated_at: now,
-      }
-    }).filter((row) => row.order_code)
 
     let ordersUpserted = 0
     let ordersNew = 0
@@ -180,63 +127,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       importId: importRecord.id,
       totalOrders: orderRows.length,
-      stats: pipelineResult.stats,
+      stats,
     })
   } catch (error) {
     console.error('Upload error:', error)
     const message = error instanceof Error ? error.message : 'Lỗi server không xác định'
     return NextResponse.json({ error: message }, { status: 500 })
-  }
-}
-
-function formatDateOnly(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
-// ---------------------------------------------------------------------------
-// Load active mapping lookup from channel_tags
-// ---------------------------------------------------------------------------
-async function loadActiveMappingLookup(
-  supabase: TypedSupabaseClient
-): Promise<MappingLookup> {
-  // Get latest active mapping import
-  const { data: latestImport } = await supabase
-    .from('mapping_imports')
-    .select('id')
-    .is('active_to', null)
-    .order('active_from', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  const lookup = new Map<string, { employeeName: string; channelDisplay: string }>()
-  const employeeSet = new Set<string>()
-
-  if (!latestImport) {
-    return { lookup, totalRows: 0, totalEmployees: 0, totalChannels: 0, unassignedCount: 0, entries: [] }
-  }
-
-  const { data: tagRows } = await supabase
-    .from('channel_tags')
-    .select('tag_name_normalized, tag_name_original, channel_display, employee_name, employee_id')
-    .eq('mapping_import_id', latestImport.id)
-
-  for (const row of tagRows || []) {
-    if (row.tag_name_normalized) {
-      lookup.set(row.tag_name_normalized, {
-        employeeName: row.employee_name || 'CHƯA GÁN',
-        channelDisplay: row.channel_display || row.tag_name_original || '',
-      })
-    }
-    if (row.employee_name) employeeSet.add(row.employee_name)
-  }
-
-  return {
-    lookup,
-    totalRows: tagRows?.length ?? 0,
-    totalEmployees: employeeSet.size,
-    totalChannels: tagRows?.length ?? 0,
-    unassignedCount: (tagRows || []).filter((r: { employee_name: string | null }) => !r.employee_name).length,
-    entries: [],
   }
 }
 

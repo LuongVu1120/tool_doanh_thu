@@ -12,6 +12,8 @@ import {
   Upload,
   BarChart3,
   Users,
+  RefreshCw,
+  Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -46,9 +48,11 @@ const navItems: NavItem[] = [
     icon: TrendingUp,
     badge: 'Media',
     children: [
+      { href: '/revenue/sapo-team', label: 'Sapo Team (mới)', icon: Sparkles },
       { href: '/revenue', label: 'Dashboard cá nhân', icon: BarChart3 },
       { href: '/revenue/team', label: 'Dashboard team', icon: Users },
       { href: '/revenue/upload', label: 'Upload dữ liệu', icon: Upload },
+      { href: '/revenue/sapo', label: 'Kết nối Sapo', icon: RefreshCw },
     ],
   },
   {

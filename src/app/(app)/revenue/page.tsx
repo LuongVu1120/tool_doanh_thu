@@ -51,6 +51,20 @@ export default function RevenueDashboardPage() {
     loadData()
   }, [currentPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`orders-dashboard-me-${currentPeriod}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        loadData()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [currentPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function loadData() {
     setLoading(true)
     setError(null)

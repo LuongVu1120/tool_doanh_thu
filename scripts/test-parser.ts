@@ -11,6 +11,7 @@ import { filterOrders } from '../src/lib/sapo-parser/filter-orders'
 import { detectExchange } from '../src/lib/sapo-parser/exchange-detector'
 import { normalizeTagForLookup, extractChannelTag } from '../src/lib/sapo-parser/tag-mapper'
 import { normalize } from '../src/lib/sapo-parser/normalize'
+import { normalizeSapoOrder } from '../src/lib/sapo-api/normalize'
 import type { SapoRawRow, SapoOrder } from '../src/types/sapo'
 
 // ─────────────────────────────────────────────────────────────
@@ -368,6 +369,51 @@ test('Non-Facebook source (e.g. Website) passes — no whitelist restriction', (
 test('Zalo source passes (not in old whitelist test, but should work)', () => {
   const result = filterOrders([makeFilterRow({ source: 'Zalo' })])
   expect(result.orders.length).toBe(1)
+})
+
+// ─────────────────────────────────────────────────────────────
+// Sapo Admin API Normalizer Tests
+// ─────────────────────────────────────────────────────────────
+console.log('\n🔌 Sapo API Normalizer')
+
+test('paid Sapo order maps to completed internal status', () => {
+  const result = normalizeSapoOrder({
+    id: 123,
+    name: 'HK123',
+    total_price: '1500000',
+    financial_status: 'paid',
+    status: 'open',
+    source_name: 'Facebook',
+    tags: 'page_HuyK - Kim Hoàn',
+    note: 'cod',
+    created_on: '2026-05-01T10:00:00+07:00',
+    processed_on: '2026-05-02T10:00:00+07:00',
+  })
+  expect(result.rawRow.orderCode).toBe('HK123')
+  expect(result.rawRow.status).toBe('Đã hoàn thành')
+  expect(result.rawRow.completedAt).toBe('2026-05-02T10:00:00+07:00')
+  expect(result.meta.sapo_order_id).toBe('123')
+})
+
+test('cancelled Sapo order maps to cancelled internal status', () => {
+  const result = normalizeSapoOrder({
+    id: 456,
+    total_price: 100000,
+    financial_status: 'refunded',
+    status: 'cancelled',
+  })
+  expect(result.rawRow.orderCode).toBe('456')
+  expect(result.rawRow.status).toBe('Đã hủy')
+})
+
+test('array tags are normalized to comma-separated string', () => {
+  const result = normalizeSapoOrder({
+    id: 789,
+    total_price: 100000,
+    financial_status: 'pending',
+    tags: ['ChatOmniAI', 'page_HuyK'],
+  })
+  expect(result.rawRow.tags).toBe('ChatOmniAI, page_HuyK')
 })
 
 // ─────────────────────────────────────────────────────────────
