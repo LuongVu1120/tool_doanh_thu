@@ -1377,6 +1377,7 @@ function ChannelsTab({
   const [onlyEmptyForAuto, setOnlyEmptyForAuto] = useState(true)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkTarget, setBulkTarget] = useState<string>('__none__')
+  const [memberSelectSearch, setMemberSelectSearch] = useState('')
 
   // Danh sách trong dropdown:
   // - Nếu đã có Media team: chỉ Media team (gọn, đúng người)
@@ -1397,6 +1398,17 @@ function ChannelsTab({
     if (mediaMembers.length > 0) return mediaMembers
     return suggestedMembers
   }, [mediaMembers, allMembers, suggestedMembers, showAllStaff])
+
+  const filteredMemberOptions = useMemo(() => {
+    const query = memberSelectSearch.trim().toLowerCase()
+    if (!query) return memberOptions
+    return memberOptions.filter((m) =>
+      (m.full_name || '').toLowerCase().includes(query) ||
+      (m.email || '').toLowerCase().includes(query) ||
+      (m.prefix_code || '').toLowerCase().includes(query) ||
+      String(m.sapo_user_id).includes(query)
+    )
+  }, [memberOptions, memberSelectSearch])
 
   const filteredChannels = useMemo(() => {
     return channels.filter((c) => {
@@ -1659,18 +1671,41 @@ function ChannelsTab({
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Gán cho:</span>
-              <Select value={bulkTarget} onValueChange={(v) => setBulkTarget(v ?? '__none__')}>
+              <Select
+                value={bulkTarget}
+                onValueChange={(v) => {
+                  setBulkTarget(v ?? '__none__')
+                  setMemberSelectSearch('')
+                }}
+              >
                 <SelectTrigger className="h-9 min-w-[260px] rounded-lg bg-white dark:bg-slate-900">
                   <SelectValue placeholder="-- Chọn nhân viên Media --" />
                 </SelectTrigger>
-                <SelectContent className="max-w-[400px]">
+                <SelectContent className="max-w-[400px] max-h-[380px] overflow-y-auto">
+                  <div
+                    className="sticky top-0 z-20 bg-white dark:bg-slate-900 p-1 pb-2 border-b border-slate-100 dark:border-slate-800"
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                      <Input
+                        value={memberSelectSearch}
+                        onChange={(e) => setMemberSelectSearch(e.target.value)}
+                        placeholder="Tìm tên, email, prefix, Sapo ID..."
+                        className="h-8 pl-8 text-xs rounded-md"
+                      />
+                    </div>
+                  </div>
                   <SelectItem value="__none__">
                     <span className="text-slate-400 italic">-- Bỏ gán --</span>
                   </SelectItem>
                   {memberOptions.length === 0 ? (
                     <div className="px-3 py-2 text-xs text-slate-400">Không có nhân viên — bật &quot;Hiện toàn bộ&quot;.</div>
+                  ) : filteredMemberOptions.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-slate-400">Không tìm thấy nhân viên phù hợp.</div>
                   ) : (
-                    memberOptions.map((m) => {
+                    filteredMemberOptions.map((m) => {
                       const isMarked = m.is_media_team
                       const isSuggested = suggestedMediaIds.has(m.sapo_user_id)
                       return (
@@ -1819,14 +1854,32 @@ function ChannelsTab({
                       <div className="flex items-center gap-2">
                         <Select
                           value={current === null || current === undefined ? '__none__' : String(current)}
-                          onValueChange={(v) => onChange(c.id, v ?? '__none__')}
+                          onValueChange={(v) => {
+                            onChange(c.id, v ?? '__none__')
+                            setMemberSelectSearch('')
+                          }}
                         >
                           <SelectTrigger className={`w-full max-w-[280px] h-9 rounded-lg ${isPending ? 'border-amber-400 ring-2 ring-amber-400/20' : ''}`}>
                             <SelectValue placeholder="-- Chọn nhân viên phụ trách --">
                               {currentMember?.full_name || (current ? `#${current}` : '-- Bỏ gán --')}
                             </SelectValue>
                           </SelectTrigger>
-                          <SelectContent className="max-w-[360px]">
+                          <SelectContent className="max-w-[360px] max-h-[380px] overflow-y-auto">
+                            <div
+                              className="sticky top-0 z-20 bg-white dark:bg-slate-900 p-1 pb-2 border-b border-slate-100 dark:border-slate-800"
+                              onKeyDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
+                            >
+                              <div className="relative">
+                                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                                <Input
+                                  value={memberSelectSearch}
+                                  onChange={(e) => setMemberSelectSearch(e.target.value)}
+                                  placeholder="Tìm tên, email, prefix, Sapo ID..."
+                                  className="h-8 pl-8 text-xs rounded-md"
+                                />
+                              </div>
+                            </div>
                             <SelectItem value="__none__">
                               <span className="text-slate-400 italic">-- Bỏ gán --</span>
                             </SelectItem>
@@ -1834,8 +1887,10 @@ function ChannelsTab({
                               <div className="px-3 py-2 text-xs text-slate-400">
                                 Không có nhân viên nào — bật &quot;Hiện toàn bộ nhân viên&quot; ở trên.
                               </div>
+                            ) : filteredMemberOptions.length === 0 ? (
+                              <div className="px-3 py-2 text-xs text-slate-400">Không tìm thấy nhân viên phù hợp.</div>
                             ) : (
-                              memberOptions.map((m) => {
+                              filteredMemberOptions.map((m) => {
                                 const isSuggested = suggestedMediaIds.has(m.sapo_user_id)
                                 const isMarked = m.is_media_team
                                 return (
