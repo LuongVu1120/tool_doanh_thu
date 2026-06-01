@@ -29,6 +29,12 @@ export async function GET(request: NextRequest) {
 
   const serviceClient = await createServiceClient()
 
+  const { data: syncState } = await serviceClient
+    .from('sapo_sync_state')
+    .select('orders_last_sync_at, orders_cursor_modified_on, total_orders_synced, total_channels_discovered, last_error')
+    .limit(1)
+    .maybeSingle()
+
   // ===== Load orders trong range =====
   const orders: Array<{
     sapo_order_id: number
@@ -70,15 +76,33 @@ export async function GET(request: NextRequest) {
 
   const channelById = new Map((channels || []).map((c) => [c.id as string, c]))
   const memberById = new Map((members || []).map((m) => [m.sapo_user_id as number, m]))
+  const trafficMemberIds = new Set(
+    (members || [])
+      .filter((m) => m.is_media_team)
+      .map((m) => m.sapo_user_id as number)
+  )
+  const trafficChannelIds = new Set(
+    (channels || [])
+      .filter((c) => c.media_member_id && trafficMemberIds.has(c.media_member_id as number))
+      .map((c) => c.id as string)
+  )
+  const trafficOrders = orders.filter((o) => o.channel_id && trafficChannelIds.has(o.channel_id))
 
   // ===== Aggregate =====
   const summary = {
-    total_orders: orders.length,
+    total_orders: trafficOrders.length,
     revenue_total: 0,
     revenue_paid: 0,
     revenue_received: 0,
     revenue_refunded: 0,
     cancelled_count: 0,
+    traffic_orders: trafficOrders.length,
+    traffic_cancelled_count: 0,
+    traffic_revenue_paid: 0,
+    traffic_revenue_gross: 0,
+    traffic_revenue_received: 0,
+    traffic_revenue_refunded: 0,
+    excluded_unassigned_orders: orders.length - trafficOrders.length,
   }
   const byPlatform = new Map<string, { orders: number; revenue: number; paid: number }>()
   const byChannel = new Map<string, { channel_id: string; channel_name: string; platform: string | null; orders: number; revenue: number; paid: number; media_member_id: number | null; media_member_name: string | null }>()
@@ -97,16 +121,18 @@ export async function GET(request: NextRequest) {
 
   const mediaChannelCount = new Map<number, Set<string>>()
 
-  for (const o of orders) {
+  for (const o of trafficOrders) {
     const totalPrice = Number(o.total_price) || 0
     const isCancelled = o.status === 'cancelled'
     const isPaid = o.financial_status === 'paid'
 
-    summary.revenue_total += isCancelled ? 0 : totalPrice
-    if (isPaid) summary.revenue_paid += totalPrice
+    if (!isCancelled) summary.traffic_revenue_gross += totalPrice
+    if (!isCancelled && isPaid) summary.traffic_revenue_paid += totalPrice
     summary.revenue_received += Number(o.total_received) || 0
     summary.revenue_refunded += Number(o.total_refunded) || 0
-    if (isCancelled) summary.cancelled_count++
+    summary.traffic_revenue_received += Number(o.total_received) || 0
+    summary.traffic_revenue_refunded += Number(o.total_refunded) || 0
+    if (isCancelled) summary.traffic_cancelled_count++
 
     // ----- Aggregate theo tháng (YYYY-MM) -----
     if (o.created_on) {
@@ -206,6 +232,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  summary.revenue_total = summary.traffic_revenue_paid
+  summary.revenue_paid = summary.traffic_revenue_paid
+  summary.cancelled_count = summary.traffic_cancelled_count
+
   // Fix channels count cho byMedia
   for (const [mid, set] of mediaChannelCount.entries()) {
     const mm = byMedia.get(mid)
@@ -214,10 +244,17 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     range: { from: fromIso, to: toIso },
+    sync: {
+      last_sync_at: syncState?.orders_last_sync_at ?? null,
+      cursor_modified_on: syncState?.orders_cursor_modified_on ?? null,
+      total_orders_synced: syncState?.total_orders_synced ?? 0,
+      total_channels_discovered: syncState?.total_channels_discovered ?? 0,
+      last_error: syncState?.last_error ?? null,
+    },
     summary,
     byPlatform: [...byPlatform.entries()].map(([platform, v]) => ({ platform, ...v })).sort((a, b) => b.revenue - a.revenue),
     byChannel: [...byChannel.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 30),
-    byMediaMember: [...byMedia.values()].sort((a, b) => b.revenue - a.revenue),
+    byMediaMember: [...byMedia.values()].sort((a, b) => b.paid - a.paid || b.revenue - a.revenue),
     byCreator: [...byCreator.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 30),
     byMonth: [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month)),
   })

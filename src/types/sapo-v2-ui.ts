@@ -42,6 +42,13 @@ export interface MemberView {
 
 export interface DashboardData {
   range: { from: string; to: string }
+  sync?: {
+    last_sync_at: string | null
+    cursor_modified_on: string | null
+    total_orders_synced: number
+    total_channels_discovered: number
+    last_error: string | null
+  }
   summary: {
     total_orders: number
     revenue_total: number
@@ -49,6 +56,13 @@ export interface DashboardData {
     revenue_received: number
     revenue_refunded: number
     cancelled_count: number
+    traffic_orders: number
+    traffic_cancelled_count: number
+    traffic_revenue_paid: number
+    traffic_revenue_gross: number
+    traffic_revenue_received: number
+    traffic_revenue_refunded: number
+    excluded_unassigned_orders: number
   }
   byPlatform: Array<{ platform: string; orders: number; revenue: number; paid: number }>
   byChannel: Array<{

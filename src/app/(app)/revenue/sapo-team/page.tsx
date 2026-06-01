@@ -62,6 +62,8 @@ import {
 } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 // ===== Types =====
 // ChannelView, MemberView, DashboardData, ChannelContext imported from @/types/sapo-v2-ui
@@ -89,6 +91,24 @@ function endOfDay(d: Date): string {
   const x = new Date(d)
   x.setHours(23, 59, 59, 999)
   return x.toISOString()
+}
+
+function monthValue(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function monthStartIso(month: string): string {
+  const [year, monthIndex] = month.split('-').map(Number)
+  return startOfDay(new Date(year, monthIndex - 1, 1))
+}
+
+function monthEndIso(month: string): string {
+  const [year, monthIndex] = month.split('-').map(Number)
+  return endOfDay(new Date(year, monthIndex, 0))
+}
+
+function formatMonthRange(from: string, to: string): string {
+  return from === to ? `Tháng ${from}` : `${from} → ${to}`
 }
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -236,6 +256,18 @@ export default function SapoTeamPage() {
   const dashboard = dashboardQuery.data ?? null
   const channels = channelsQuery.data ?? EMPTY_CHANNELS
   const members = membersQuery.data ?? EMPTY_MEMBERS
+  const trafficSummary = useMemo(() => {
+    const summary = dashboard?.summary
+    return {
+      orders: summary?.traffic_orders ?? summary?.total_orders ?? 0,
+      cancelled: summary?.traffic_cancelled_count ?? summary?.cancelled_count ?? 0,
+      paid: summary?.traffic_revenue_paid ?? summary?.revenue_paid ?? 0,
+      gross: summary?.traffic_revenue_gross ?? summary?.revenue_total ?? 0,
+      received: summary?.traffic_revenue_received ?? summary?.revenue_received ?? 0,
+      refunded: summary?.traffic_revenue_refunded ?? summary?.revenue_refunded ?? 0,
+      excluded: summary?.excluded_unassigned_orders ?? 0,
+    }
+  }, [dashboard])
 
   const loading =
     (dashboardQuery.isLoading && !dashboardQuery.data) ||
@@ -537,41 +569,51 @@ export default function SapoTeamPage() {
 
       {/* Metric Highlighting Cards */}
       {dashboard && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard
-            label="Tổng đơn hàng"
-            value={dashboard.summary.total_orders.toLocaleString('vi-VN')}
-            sub={`${dashboard.summary.cancelled_count.toLocaleString('vi-VN')} đơn đã hủy`}
-            percentage={dashboard.summary.total_orders > 0 ? Math.round((dashboard.summary.cancelled_count / dashboard.summary.total_orders) * 100) : 0}
-            percentageLabel="tỷ lệ hủy"
-            theme="blue"
-            icon={Hash}
-          />
-          <MetricCard
-            label="Doanh thu thực tế"
-            value={formatMoney(dashboard.summary.revenue_total)}
-            sub="Không tính các đơn đã hủy"
-            theme="violet"
-            icon={TrendingUp}
-          />
-          <MetricCard
-            label="Đã thanh toán"
-            value={formatMoney(dashboard.summary.revenue_paid)}
-            sub={`Thực thu ví: ${formatMoney(dashboard.summary.revenue_received)}`}
-            percentage={dashboard.summary.revenue_total > 0 ? Math.round((dashboard.summary.revenue_paid / dashboard.summary.revenue_total) * 100) : 0}
-            percentageLabel="đã thu tiền"
-            theme="emerald"
-            icon={CheckCircle2}
-          />
-          <MetricCard
-            label="Tổng tiền hoàn trả"
-            value={formatMoney(dashboard.summary.revenue_refunded)}
-            sub="Hoàn hàng / Trả lại ví khách"
-            percentage={dashboard.summary.revenue_total > 0 ? Number(((dashboard.summary.revenue_refunded / dashboard.summary.revenue_total) * 100).toFixed(1)) : 0}
-            percentageLabel="tỷ lệ hoàn"
-            theme="rose"
-            icon={AlertTriangle}
-          />
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <MetricCard
+              label="Tổng đơn Traffic"
+              value={trafficSummary.orders.toLocaleString('vi-VN')}
+              sub={`${trafficSummary.cancelled.toLocaleString('vi-VN')} đơn đã hủy`}
+              percentage={trafficSummary.orders > 0 ? Math.round((trafficSummary.cancelled / trafficSummary.orders) * 100) : 0}
+              percentageLabel="tỷ lệ hủy"
+              theme="blue"
+              icon={Hash}
+            />
+            <MetricCard
+              label="Doanh thu Traffic đã thanh toán"
+              value={formatMoney(trafficSummary.paid)}
+              sub={`Gross chưa hủy: ${formatMoney(trafficSummary.gross)}`}
+              theme="violet"
+              icon={TrendingUp}
+            />
+            <MetricCard
+              label="Thực thu ví"
+              value={formatMoney(trafficSummary.received)}
+              sub={`Paid / Gross: ${trafficSummary.gross > 0 ? Math.round((trafficSummary.paid / trafficSummary.gross) * 100) : 0}%`}
+              percentage={trafficSummary.gross > 0 ? Math.round((trafficSummary.paid / trafficSummary.gross) * 100) : 0}
+              percentageLabel="paid/gross"
+              theme="emerald"
+              icon={CheckCircle2}
+            />
+            <MetricCard
+              label="Tổng tiền hoàn trả"
+              value={formatMoney(trafficSummary.refunded)}
+              sub="Hoàn hàng / Trả lại ví khách"
+              percentage={trafficSummary.paid > 0 ? Number(((trafficSummary.refunded / trafficSummary.paid) * 100).toFixed(1)) : 0}
+              percentageLabel="tỷ lệ hoàn"
+              theme="rose"
+              icon={AlertTriangle}
+            />
+          </div>
+          {trafficSummary.excluded > 0 && (
+            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-800 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Đã loại {trafficSummary.excluded.toLocaleString('vi-VN')} đơn khỏi báo cáo vì chưa thuộc kênh gán cho member Traffic.
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -615,7 +657,7 @@ export default function SapoTeamPage() {
           </div>
 
           <div className="text-xs text-slate-400 font-medium py-1">
-            Lần cuối cập nhật dữ liệu: {dashboard && new Date().toLocaleTimeString('vi-VN')}
+            Lần sync Sapo cuối: {dashboard?.sync?.last_sync_at ? new Date(dashboard.sync.last_sync_at).toLocaleString('vi-VN') : 'chưa có dữ liệu'}
           </div>
         </div>
 
@@ -760,30 +802,45 @@ function PlatformBadge({ platform }: { platform: string }) {
 
 function OverviewTab({ data }: { data: DashboardData }) {
   const [channelSearch, setChannelSearch] = useState('')
-  const [creatorSearch, setCreatorSearch] = useState('')
+  const [mediaSearch, setMediaSearch] = useState('')
+  const [tableMonthFrom, setTableMonthFrom] = useState(() => monthValue())
+  const [tableMonthTo, setTableMonthTo] = useState(() => monthValue())
+  const trafficGross = data.summary.traffic_revenue_gross ?? data.summary.revenue_total ?? 0
+  const [effectiveMonthFrom, effectiveMonthTo] = useMemo(() => {
+    return tableMonthFrom <= tableMonthTo
+      ? [tableMonthFrom, tableMonthTo]
+      : [tableMonthTo, tableMonthFrom]
+  }, [tableMonthFrom, tableMonthTo])
+  const tableFromIso = useMemo(() => monthStartIso(effectiveMonthFrom), [effectiveMonthFrom])
+  const tableToIso = useMemo(() => monthEndIso(effectiveMonthTo), [effectiveMonthTo])
+  const tableDashboardQuery = useSapoDashboard(tableFromIso, tableToIso)
+  const tableData = tableDashboardQuery.data ?? data
+  const tableMonthLabel = formatMonthRange(effectiveMonthFrom, effectiveMonthTo)
+  const currentMonth = monthValue()
 
   const filteredChannels = useMemo(() => {
-    if (!channelSearch) return data.byChannel
+    if (!channelSearch) return tableData.byChannel
     const q = channelSearch.toLowerCase()
-    return data.byChannel.filter((c) =>
+    return tableData.byChannel.filter((c) =>
       c.channel_name.toLowerCase().includes(q) ||
       (c.media_member_name || '').toLowerCase().includes(q)
     )
-  }, [data.byChannel, channelSearch])
+  }, [tableData.byChannel, channelSearch])
 
-  const filteredCreators = useMemo(() => {
-    if (!creatorSearch) return data.byCreator
-    const q = creatorSearch.toLowerCase()
-    return data.byCreator.filter((c) =>
+  const topTrafficMembers = useMemo(() => {
+    const ranked = [...tableData.byMediaMember].sort((a, b) => b.paid - a.paid || b.revenue - a.revenue)
+    if (!mediaSearch) return ranked
+    const q = mediaSearch.toLowerCase()
+    return ranked.filter((c) =>
       c.name.toLowerCase().includes(q) ||
       (c.prefix || '').toLowerCase().includes(q)
     )
-  }, [data.byCreator, creatorSearch])
+  }, [tableData.byMediaMember, mediaSearch])
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       {/* Platform breakdown */}
-      <Card className="border border-slate-200 dark:border-slate-800/80 shadow-sm rounded-xl">
+      <Card className="order-3 border border-slate-200 dark:border-slate-800/80 shadow-sm rounded-xl">
         <CardHeader className="border-b border-slate-100 dark:border-slate-800 p-5">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
@@ -810,8 +867,8 @@ function OverviewTab({ data }: { data: DashboardData }) {
             </TableHeader>
             <TableBody>
               {data.byPlatform.map((p) => {
-                const pct = data.summary.revenue_total > 0
-                  ? (p.revenue / data.summary.revenue_total) * 100
+                const pct = trafficGross > 0
+                  ? (p.revenue / trafficGross) * 100
                   : 0
                 return (
                   <TableRow key={p.platform} className="border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-500/5 transition">
@@ -836,7 +893,7 @@ function OverviewTab({ data }: { data: DashboardData }) {
       </Card>
 
       {/* Media team split */}
-      <Card className="border border-slate-200 dark:border-slate-800/80 shadow-sm rounded-xl">
+      <Card className="order-4 border border-slate-200 dark:border-slate-800/80 shadow-sm rounded-xl">
         <CardHeader className="border-b border-slate-100 dark:border-slate-800 p-5">
           <div className="space-y-1">
             <CardTitle className="text-base font-bold flex items-center gap-2 text-slate-800 dark:text-white">
@@ -899,8 +956,54 @@ function OverviewTab({ data }: { data: DashboardData }) {
         </CardContent>
       </Card>
 
-      {/* Grid: Channels and Creators list */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="order-1 flex flex-col lg:flex-row lg:items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-900/60 p-4 shadow-sm">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2 text-sm font-extrabold text-slate-800 dark:text-white">
+            <Calendar className="h-4 w-4 text-blue-500" />
+            Bộ lọc tháng cho Top kênh và Top Traffic
+            {tableDashboardQuery.isFetching && <RefreshCw className="h-3.5 w-3.5 animate-spin text-slate-400" />}
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Đang hiển thị {tableMonthLabel}. Mặc định là tháng hiện tại.
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+          <label className="space-y-1">
+            <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Từ tháng</span>
+            <Input
+              type="month"
+              value={tableMonthFrom}
+              onChange={(e) => setTableMonthFrom(e.target.value || currentMonth)}
+              className="h-9 w-full sm:w-[150px] rounded-lg text-sm"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Đến tháng</span>
+            <Input
+              type="month"
+              value={tableMonthTo}
+              onChange={(e) => setTableMonthTo(e.target.value || currentMonth)}
+              className="h-9 w-full sm:w-[150px] rounded-lg text-sm"
+            />
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-lg font-bold"
+            disabled={tableMonthFrom === currentMonth && tableMonthTo === currentMonth}
+            onClick={() => {
+              setTableMonthFrom(currentMonth)
+              setTableMonthTo(currentMonth)
+            }}
+          >
+            Tháng hiện tại
+          </Button>
+        </div>
+      </div>
+
+      {/* Grid: Channels and Traffic members list */}
+      <div className="order-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Top channels list */}
         <Card className="border border-slate-200 dark:border-slate-800/80 shadow-sm rounded-xl">
           <CardHeader className="border-b border-slate-100 dark:border-slate-800 p-5">
@@ -969,23 +1072,23 @@ function OverviewTab({ data }: { data: DashboardData }) {
           </CardContent>
         </Card>
 
-        {/* Top order creators list */}
+        {/* Top traffic members list */}
         <Card className="border border-slate-200 dark:border-slate-800/80 shadow-sm rounded-xl">
           <CardHeader className="border-b border-slate-100 dark:border-slate-800 p-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="space-y-0.5">
                 <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800 dark:text-white">
                   <Users className="w-4 h-4 text-sky-500" />
-                  Top Nhân Viên Tạo Đơn tốt nhất (KD/Store/TMĐT)
+                  Top Nhân Viên Traffic có doanh thu cao nhất
                 </CardTitle>
-                <CardDescription className="text-xs">Hiệu suất lên đơn của sales & nhân viên cửa hàng.</CardDescription>
+                <CardDescription className="text-xs">Chỉ tính member thuộc team Traffic/Media, theo kênh đã gán.</CardDescription>
               </div>
               <div className="relative max-w-[200px] w-full shrink-0">
                 <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
                 <Input
-                  placeholder="Lọc tên, mã đội (KD...)..."
-                  value={creatorSearch}
-                  onChange={(e) => setCreatorSearch(e.target.value)}
+                  placeholder="Lọc tên, mã đội..."
+                  value={mediaSearch}
+                  onChange={(e) => setMediaSearch(e.target.value)}
                   className="pl-8 h-8 text-xs rounded-lg"
                 />
               </div>
@@ -995,21 +1098,21 @@ function OverviewTab({ data }: { data: DashboardData }) {
             <Table>
               <TableHeader className="bg-slate-50 dark:bg-slate-950/80 sticky top-0 z-10">
                 <TableRow className="border-b border-slate-100 dark:border-slate-800 hover:bg-transparent">
-                  <TableHead className="font-semibold text-xs py-2">Nhân viên</TableHead>
-                  <TableHead className="font-semibold text-xs py-2">Đội ngũ</TableHead>
+                  <TableHead className="font-semibold text-xs py-2">Nhân viên Traffic</TableHead>
+                  <TableHead className="font-semibold text-xs py-2">Mã đội</TableHead>
                   <TableHead className="text-right font-semibold text-xs py-2">Đơn</TableHead>
-                  <TableHead className="text-right font-semibold text-xs py-2">Doanh thu</TableHead>
+                  <TableHead className="text-right font-semibold text-xs py-2">Đã thanh toán</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredCreators.length === 0 ? (
+                {topTrafficMembers.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4} className="text-center py-8 text-xs text-slate-400">
-                      Không tìm thấy nhân viên phù hợp
+                      Không tìm thấy nhân viên Traffic phù hợp
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredCreators.map((c) => (
+                  topTrafficMembers.map((c) => (
                     <TableRow key={c.sapo_user_id} className="border-b border-slate-100 dark:border-slate-800/40 hover:bg-slate-500/5 transition">
                       <TableCell className="py-2.5 font-bold text-xs">{c.name}</TableCell>
                       <TableCell className="py-2.5">
@@ -1023,7 +1126,7 @@ function OverviewTab({ data }: { data: DashboardData }) {
                       </TableCell>
                       <TableCell className="text-right font-semibold text-xs py-2.5">{c.orders.toLocaleString('vi-VN')}</TableCell>
                       <TableCell className="text-right font-extrabold text-slate-850 dark:text-white py-2.5 text-xs">
-                        {formatMoney(c.revenue)}
+                        {formatMoney(c.paid)}
                       </TableCell>
                     </TableRow>
                   ))
@@ -1309,6 +1412,10 @@ function ChannelsTab({
   const suggestedMediaIds = useMemo(
     () => new Set(suggestedMembers.map((m) => m.sapo_user_id)),
     [suggestedMembers]
+  )
+  const memberById = useMemo(
+    () => new Map(allMembers.map((m) => [m.sapo_user_id, m])),
+    [allMembers]
   )
 
   const allFilteredSelected = filteredChannels.length > 0 && filteredChannels.every((c) => selectedIds.has(c.id))
@@ -1603,11 +1710,11 @@ function ChannelsTab({
           <TableHeader className="bg-slate-50 dark:bg-slate-950">
             <TableRow className="border-b border-slate-100 dark:border-slate-800 hover:bg-transparent">
               <TableHead className="w-[40px] py-3">
-                <input
+                <Checkbox
                   type="checkbox"
                   checked={allFilteredSelected}
                   onChange={toggleSelectAllVisible}
-                  className="rounded cursor-pointer accent-blue-600 w-4 h-4"
+                  className="cursor-pointer"
                   title={allFilteredSelected ? 'Bỏ chọn tất cả hàng đang hiển thị' : 'Chọn tất cả hàng đang hiển thị'}
                 />
               </TableHead>
@@ -1635,6 +1742,7 @@ function ChannelsTab({
             ) : (
               filteredChannels.map((c) => {
                 const current = pending[c.id] !== undefined ? pending[c.id] : c.media_member_id
+                const currentMember = current ? memberById.get(Number(current)) : null
                 const isPending = pending[c.id] !== undefined
                 const isSelected = selectedIds.has(c.id)
                 const ctx = channelContexts[c.id]
@@ -1646,11 +1754,11 @@ function ChannelsTab({
                     } ${isSelected ? 'bg-blue-500/5 dark:bg-blue-500/10' : ''}`}
                   >
                     <TableCell className="py-3">
-                      <input
+                      <Checkbox
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => toggleSelected(c.id)}
-                        className="rounded cursor-pointer accent-blue-600 w-4 h-4"
+                        className="cursor-pointer"
                       />
                     </TableCell>
                     <TableCell className="py-3">
@@ -1714,7 +1822,9 @@ function ChannelsTab({
                           onValueChange={(v) => onChange(c.id, v ?? '__none__')}
                         >
                           <SelectTrigger className={`w-full max-w-[280px] h-9 rounded-lg ${isPending ? 'border-amber-400 ring-2 ring-amber-400/20' : ''}`}>
-                            <SelectValue placeholder="-- Chọn nhân viên phụ trách --" />
+                            <SelectValue placeholder="-- Chọn nhân viên phụ trách --">
+                              {currentMember?.full_name || (current ? `#${current}` : '-- Bỏ gán --')}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent className="max-w-[360px]">
                             <SelectItem value="__none__">
@@ -1788,6 +1898,8 @@ function MembersTab({
   onAutoDetect: () => void
 }) {
   const [filter, setFilter] = useState('')
+  const [memberToAdd, setMemberToAdd] = useState<string>('')
+  const [memberAddSearch, setMemberAddSearch] = useState('')
   // Mặc định: hiện nhân viên Media (đã đánh dấu hoặc gợi ý) để user không bị rối
   const initialFilter: 'all' | 'media' | 'suggested' | 'non_media' = useMemo(() => {
     const anyMedia = members.some((m) => m.is_media_team)
@@ -1825,6 +1937,33 @@ function MembersTab({
     const v = pending[m.sapo_user_id]
     return v === undefined ? m.is_media_team : v
   }).length
+  const addableMembers = useMemo(() => {
+    return members
+      .filter((m) => {
+        const checked = pending[m.sapo_user_id] !== undefined ? pending[m.sapo_user_id] : m.is_media_team
+        return !checked
+      })
+      .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+  }, [members, pending])
+  const filteredAddableMembers = useMemo(() => {
+    const q = memberAddSearch.trim().toLowerCase()
+    if (!q) return addableMembers
+    return addableMembers.filter((m) =>
+      (m.full_name || '').toLowerCase().includes(q) ||
+      (m.email || '').toLowerCase().includes(q) ||
+      (m.prefix_code || '').toLowerCase().includes(q) ||
+      String(m.sapo_user_id).includes(q)
+    )
+  }, [addableMembers, memberAddSearch])
+
+  function addMemberToMedia() {
+    const id = Number(memberToAdd)
+    if (!Number.isFinite(id)) return
+    onToggle(id, true)
+    setMemberToAdd('')
+    setMemberAddSearch('')
+    setStatusFilter('media')
+  }
 
   return (
     <Card className="border border-slate-200 dark:border-slate-800/80 shadow-sm rounded-xl">
@@ -1866,6 +2005,84 @@ function MembersTab({
               )}
               Lưu thay đổi {pendingCount > 0 ? `(${pendingCount})` : ''}
             </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.1fr] gap-3">
+          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/25 dark:text-blue-200">
+            <div className="font-bold mb-1">Ảnh hưởng khi gán member vào kênh</div>
+            <p className="leading-relaxed">
+              Gán kênh cho member Media không sửa đơn gốc trên Sapo. Nó chỉ đổi cách báo cáo phân bổ:
+              kênh chưa gán khi được gán vào Traffic sẽ làm tăng tổng đơn/doanh thu Traffic; kênh đã gán đổi sang người khác
+              thì doanh thu chuyển từ member cũ sang member mới.
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 p-3">
+            <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+              <div className="flex-1 space-y-1">
+                <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                  Thêm nhanh member Media
+                </span>
+                <Select value={memberToAdd} onValueChange={(v) => setMemberToAdd(v || '')}>
+                  <SelectTrigger className="h-9 rounded-lg bg-white dark:bg-slate-900">
+                    <SelectValue placeholder="Chọn nhân viên Sapo chưa thuộc Media..." />
+                  </SelectTrigger>
+                  <SelectContent className="max-w-[420px] max-h-[360px] overflow-y-auto" alignItemWithTrigger>
+                    <div
+                      className="sticky top-0 z-20 bg-white dark:bg-slate-900 p-1 pb-2 border-b border-slate-100 dark:border-slate-800"
+                      onKeyDown={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                        <Input
+                          value={memberAddSearch}
+                          onChange={(e) => setMemberAddSearch(e.target.value)}
+                          placeholder="Tìm tên, email, prefix, Sapo ID..."
+                          className="h-8 pl-8 text-xs rounded-md"
+                        />
+                      </div>
+                    </div>
+                    {addableMembers.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-slate-400">
+                        Tất cả nhân viên hiện có đã thuộc Media hoặc đang chờ lưu.
+                      </div>
+                    ) : filteredAddableMembers.length === 0 ? (
+                      <div className="px-3 py-3 text-xs text-slate-400">
+                        Không tìm thấy nhân viên phù hợp.
+                      </div>
+                    ) : (
+                      filteredAddableMembers.map((m) => (
+                        <SelectItem key={m.sapo_user_id} value={String(m.sapo_user_id)}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-semibold truncate">{m.full_name || `#${m.sapo_user_id}`}</span>
+                            {m.prefix_code && (
+                              <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
+                                {m.prefix_code}
+                              </Badge>
+                            )}
+                            <span className="text-[10px] text-slate-400">#{m.sapo_user_id}</span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                className="h-9 rounded-lg font-bold"
+                disabled={!memberToAdd}
+                onClick={addMemberToMedia}
+              >
+                <Users className="h-3.5 w-3.5 mr-1.5" />
+                Thêm vào Media
+              </Button>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Sau khi thêm, bấm “Lưu thay đổi” để ghi `is_media_team=true` vào DB.
+            </p>
           </div>
         </div>
 

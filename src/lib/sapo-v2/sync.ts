@@ -91,6 +91,8 @@ export interface SyncSapoOrdersOptions {
   createdOnMin?: string | null
   /** Sync incremental theo modified_on (đè createdOnMin nếu cùng truyền). */
   modifiedOnMin?: string | null
+  /** Persisted cursor floor. Keeps overlapped incremental syncs from moving the cursor backwards. */
+  cursorFloor?: string | null
   /** Số đơn tối đa cần sync (an toàn cho lần test đầu). Mặc định: không giới hạn. */
   maxOrders?: number
   /** Page size (mặc định 250 - max của Sapo). */
@@ -126,7 +128,7 @@ export async function syncSapoOrders(
   const channelKeyToId = new Map<string, string>()
   const discoveredChannelIds = new Set<string>()
   let lastRateLimit: string | null = null
-  let cursorModifiedOn: string | null = null
+  let cursorModifiedOn: string | null = options.cursorFloor ?? null
   let pagesFetched = 0
   let totalOrdersFetched = 0
   let totalOrdersUpserted = 0
