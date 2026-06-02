@@ -915,6 +915,12 @@ function AliasReviewPanel({
             : memberByPrefix.get((row.excel_owner || '').trim().toLowerCase())
           const selectedChannelId = aliasChannelSelection[row.id] || row.channel_id || ''
           const selectedOwnerId = aliasOwnerSelection[row.id] || (ownerHint ? String(ownerHint.sapo_user_id) : '')
+          const selectedChannel = selectedChannelId
+            ? aliasChannelOptions.find((channel) => channel.id === selectedChannelId)
+            : null
+          const selectedOwner = selectedOwnerId
+            ? mediaMembers.find((member) => member.sapo_user_id === Number(selectedOwnerId))
+            : null
           const canResolve = Boolean(selectedChannelId && selectedOwnerId)
           const candidateLabels = (row.candidates || [])
             .slice(0, 3)
@@ -951,7 +957,9 @@ function AliasReviewPanel({
                 onValueChange={(value) => onChannelSelectionChange(row.id, value || '')}
               >
                 <SelectTrigger className="h-9 w-full rounded-lg border-amber-300 bg-white">
-                  <SelectValue placeholder="Chọn kênh Sapo" />
+                  <SelectValue placeholder="Chọn kênh Sapo">
+                    {selectedChannel ? (selectedChannel.branch_name || selectedChannel.alias || selectedChannel.id) : undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="max-h-[360px] max-w-[420px] overflow-y-auto">
                   {aliasChannelOptions.map((channel) => (
@@ -974,7 +982,14 @@ function AliasReviewPanel({
                 onValueChange={(value) => onOwnerSelectionChange(row.id, value || '')}
               >
                 <SelectTrigger className="h-9 w-full rounded-lg border-amber-300 bg-white">
-                  <SelectValue placeholder="Chọn member Media" />
+                  <SelectValue placeholder="Chọn member Media">
+                    {selectedOwner ? (
+                      <span className="truncate">
+                        {selectedOwner.full_name || `#${selectedOwner.sapo_user_id}`}
+                        {selectedOwner.prefix_code ? ` (${selectedOwner.prefix_code})` : ''}
+                      </span>
+                    ) : undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="max-h-[360px] max-w-[360px] overflow-y-auto">
                   {mediaMembers.map((member) => (
