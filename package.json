@@ -23,6 +23,7 @@
     "test:parser": "tsx scripts/test-parser.ts",
     "test:revenue-golden": "tsx scripts/test-revenue-golden.ts",
     "seed:revenue-golden": "tsx scripts/seed-golden-adjustments.ts",
+    "seed:media-excel": "node scripts/seed-media-from-excel.mjs",
     "check:revenue-db": "tsx scripts/check-db-revenue-reconciliation.ts",
     "clear:revenue-data": "tsx scripts/clear-revenue-data.ts"
   },

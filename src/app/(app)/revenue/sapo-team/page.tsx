@@ -2033,7 +2033,7 @@ function MembersTab({
               </Badge>
             </CardTitle>
             <CardDescription className="text-xs">
-              Tick chọn để ghi nhận nhân viên thuộc đội Media phụ trách kênh (doanh thu sẽ hiển thị trong báo cáo).
+              Danh sách Media/Traffic được seed từ file Excel kế toán; doanh thu phân bổ theo kênh đã gán cho từng member.
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -2076,11 +2076,11 @@ function MembersTab({
             <div className="flex flex-col sm:flex-row sm:items-end gap-2">
               <div className="flex-1 space-y-1">
                 <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                  Thêm nhanh member Media
+                  Thêm bổ sung member Media
                 </span>
                 <Select value={memberToAdd} onValueChange={(v) => setMemberToAdd(v || '')}>
                   <SelectTrigger className="h-9 rounded-lg bg-white dark:bg-slate-900">
-                    <SelectValue placeholder="Chọn nhân viên Sapo chưa thuộc Media..." />
+                    <SelectValue placeholder="Chọn nhân viên bổ sung..." />
                   </SelectTrigger>
                   <SelectContent className="max-w-[420px] max-h-[360px] overflow-y-auto" alignItemWithTrigger>
                     <div
@@ -2127,7 +2127,7 @@ function MembersTab({
               <Button
                 type="button"
                 size="sm"
-                className="h-9 rounded-lg font-bold"
+                className="h-9 rounded-lg font-bold bg-emerald-600 text-white shadow-sm shadow-emerald-600/20 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:bg-emerald-500 dark:hover:bg-emerald-600"
                 disabled={!memberToAdd}
                 onClick={addMemberToMedia}
               >
@@ -2136,7 +2136,7 @@ function MembersTab({
               </Button>
             </div>
             <p className="mt-2 text-[11px] text-slate-500">
-              Sau khi thêm, bấm “Lưu thay đổi” để ghi `is_media_team=true` vào DB.
+              Luồng chính lấy Media từ Excel. Nút này chỉ dùng khi cần bổ sung tạm thời rồi bấm “Lưu thay đổi”.
             </p>
           </div>
         </div>
