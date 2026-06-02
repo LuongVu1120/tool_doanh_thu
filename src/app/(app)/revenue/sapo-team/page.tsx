@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
+  useCreateMediaMember,
   useSaveChannelAssignments,
   useSaveMediaToggles,
   useSapoChannels,
@@ -252,6 +253,7 @@ export default function SapoTeamPage() {
   const syncMutation = useSapoV2Sync()
   const saveAssignmentsMutation = useSaveChannelAssignments()
   const saveMediaMutation = useSaveMediaToggles()
+  const createMediaMemberMutation = useCreateMediaMember()
 
   const dashboard = dashboardQuery.data ?? null
   const channels = channelsQuery.data ?? EMPTY_CHANNELS
@@ -274,7 +276,7 @@ export default function SapoTeamPage() {
     (channelsQuery.isLoading && !channelsQuery.data) ||
     (membersQuery.isLoading && !membersQuery.data)
   const syncing = syncMutation.isPending
-  const saving = saveAssignmentsMutation.isPending || saveMediaMutation.isPending
+  const saving = saveAssignmentsMutation.isPending || saveMediaMutation.isPending || createMediaMemberMutation.isPending
 
   const [actionError, setActionError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -345,6 +347,19 @@ export default function SapoTeamPage() {
       setPendingMediaToggles({})
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Lỗi không xác định')
+    }
+  }
+
+  async function createExternalMediaMember(input: { full_name: string; prefix_code?: string | null; email?: string | null }) {
+    setActionError(null)
+    setMessage(null)
+    try {
+      const data = await createMediaMemberMutation.mutateAsync(input)
+      const name = data.member?.full_name || input.full_name
+      setMessage(`Đã tạo nhân sự Media ngoài "${name}". Bạn có thể gán nhân sự này vào kênh và lưu thay đổi.`)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Lỗi không xác định')
+      throw e
     }
   }
 
@@ -702,6 +717,7 @@ export default function SapoTeamPage() {
                 onSave={saveMediaToggles}
                 saving={saving}
                 onAutoDetect={autoDetectAndStageMedia}
+                onCreateExternalMember={createExternalMediaMember}
               />
             )}
           </div>
@@ -1943,6 +1959,7 @@ function MembersTab({
   onSave,
   saving,
   onAutoDetect,
+  onCreateExternalMember,
 }: {
   members: MemberView[]
   suggestedMembers: MemberView[]
@@ -1951,10 +1968,13 @@ function MembersTab({
   onSave: () => void
   saving: boolean
   onAutoDetect: () => void
+  onCreateExternalMember: (input: { full_name: string; prefix_code?: string | null; email?: string | null }) => Promise<void>
 }) {
   const [filter, setFilter] = useState('')
-  const [memberToAdd, setMemberToAdd] = useState<string>('')
-  const [memberAddSearch, setMemberAddSearch] = useState('')
+  const [newMemberName, setNewMemberName] = useState('')
+  const [newMemberPrefix, setNewMemberPrefix] = useState('')
+  const [newMemberEmail, setNewMemberEmail] = useState('')
+  const [creatingMember, setCreatingMember] = useState(false)
   // Mặc định: hiện nhân viên Media (đã đánh dấu hoặc gợi ý) để user không bị rối
   const initialFilter: 'all' | 'media' | 'suggested' | 'non_media' = useMemo(() => {
     const anyMedia = members.some((m) => m.is_media_team)
@@ -1992,32 +2012,23 @@ function MembersTab({
     const v = pending[m.sapo_user_id]
     return v === undefined ? m.is_media_team : v
   }).length
-  const addableMembers = useMemo(() => {
-    return members
-      .filter((m) => {
-        const checked = pending[m.sapo_user_id] !== undefined ? pending[m.sapo_user_id] : m.is_media_team
-        return !checked
+  async function addExternalMemberToMedia() {
+    const fullName = newMemberName.trim().replace(/\s+/g, ' ')
+    if (!fullName || creatingMember) return
+    setCreatingMember(true)
+    try {
+      await onCreateExternalMember({
+        full_name: fullName,
+        prefix_code: newMemberPrefix.trim() || null,
+        email: newMemberEmail.trim() || null,
       })
-      .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
-  }, [members, pending])
-  const filteredAddableMembers = useMemo(() => {
-    const q = memberAddSearch.trim().toLowerCase()
-    if (!q) return addableMembers
-    return addableMembers.filter((m) =>
-      (m.full_name || '').toLowerCase().includes(q) ||
-      (m.email || '').toLowerCase().includes(q) ||
-      (m.prefix_code || '').toLowerCase().includes(q) ||
-      String(m.sapo_user_id).includes(q)
-    )
-  }, [addableMembers, memberAddSearch])
-
-  function addMemberToMedia() {
-    const id = Number(memberToAdd)
-    if (!Number.isFinite(id)) return
-    onToggle(id, true)
-    setMemberToAdd('')
-    setMemberAddSearch('')
-    setStatusFilter('media')
+      setNewMemberName('')
+      setNewMemberPrefix('')
+      setNewMemberEmail('')
+      setStatusFilter('media')
+    } finally {
+      setCreatingMember(false)
+    }
   }
 
   return (
@@ -2073,70 +2084,49 @@ function MembersTab({
             </p>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 p-3">
-            <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+            <div className="flex flex-col xl:flex-row xl:items-end gap-2">
               <div className="flex-1 space-y-1">
                 <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                  Thêm bổ sung member Media
+                  Tạo nhân sự Media ngoài Sapo
                 </span>
-                <Select value={memberToAdd} onValueChange={(v) => setMemberToAdd(v || '')}>
-                  <SelectTrigger className="h-9 rounded-lg bg-white dark:bg-slate-900">
-                    <SelectValue placeholder="Chọn nhân viên bổ sung..." />
-                  </SelectTrigger>
-                  <SelectContent className="max-w-[420px] max-h-[360px] overflow-y-auto" alignItemWithTrigger>
-                    <div
-                      className="sticky top-0 z-20 bg-white dark:bg-slate-900 p-1 pb-2 border-b border-slate-100 dark:border-slate-800"
-                      onKeyDown={(e) => e.stopPropagation()}
-                      onPointerDown={(e) => e.stopPropagation()}
-                    >
-                      <div className="relative">
-                        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                        <Input
-                          value={memberAddSearch}
-                          onChange={(e) => setMemberAddSearch(e.target.value)}
-                          placeholder="Tìm tên, email, prefix, Sapo ID..."
-                          className="h-8 pl-8 text-xs rounded-md"
-                        />
-                      </div>
-                    </div>
-                    {addableMembers.length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-slate-400">
-                        Tất cả nhân viên hiện có đã thuộc Media hoặc đang chờ lưu.
-                      </div>
-                    ) : filteredAddableMembers.length === 0 ? (
-                      <div className="px-3 py-3 text-xs text-slate-400">
-                        Không tìm thấy nhân viên phù hợp.
-                      </div>
-                    ) : (
-                      filteredAddableMembers.map((m) => (
-                        <SelectItem key={m.sapo_user_id} value={String(m.sapo_user_id)}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-semibold truncate">{m.full_name || `#${m.sapo_user_id}`}</span>
-                            {m.prefix_code && (
-                              <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
-                                {m.prefix_code}
-                              </Badge>
-                            )}
-                            <span className="text-[10px] text-slate-400">#{m.sapo_user_id}</span>
-                          </div>
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                <div className="grid grid-cols-1 sm:grid-cols-[1.2fr_0.7fr] gap-2">
+                  <Input
+                    value={newMemberName}
+                    onChange={(e) => setNewMemberName(e.target.value)}
+                    placeholder="Tên nhân sự, ví dụ: Media Nguyễn Văn A"
+                    className="h-9 rounded-lg bg-white dark:bg-slate-900"
+                  />
+                  <Input
+                    value={newMemberPrefix}
+                    onChange={(e) => setNewMemberPrefix(e.target.value)}
+                    placeholder="Mã đội / prefix"
+                    className="h-9 rounded-lg bg-white dark:bg-slate-900"
+                  />
+                </div>
+                <Input
+                  value={newMemberEmail}
+                  onChange={(e) => setNewMemberEmail(e.target.value)}
+                  placeholder="Email ghi chú (không bắt buộc)"
+                  className="h-9 rounded-lg bg-white dark:bg-slate-900"
+                />
               </div>
               <Button
                 type="button"
                 size="sm"
                 className="h-9 rounded-lg font-bold bg-emerald-600 text-white shadow-sm shadow-emerald-600/20 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:bg-emerald-500 dark:hover:bg-emerald-600"
-                disabled={!memberToAdd}
-                onClick={addMemberToMedia}
+                disabled={!newMemberName.trim() || creatingMember || saving}
+                onClick={addExternalMemberToMedia}
               >
-                <Users className="h-3.5 w-3.5 mr-1.5" />
-                Thêm vào Media
+                {creatingMember ? (
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Users className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Tạo Media
               </Button>
             </div>
             <p className="mt-2 text-[11px] text-slate-500">
-              Luồng chính lấy Media từ Excel. Nút này chỉ dùng khi cần bổ sung tạm thời rồi bấm “Lưu thay đổi”.
+              Nhân sự tạo mới là member nội bộ, không liên kết tài khoản Sapo/Gmail. Sau khi tạo, gán người này vào kênh để doanh thu chuyển sang member đó.
             </p>
           </div>
         </div>

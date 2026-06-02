@@ -42,6 +42,14 @@ export function fetchSapoMembers() {
   return fetchJson<{ members: MemberView[] }>('/api/sapo-v2/members')
 }
 
+export function createSapoExternalMember(input: { full_name: string; prefix_code?: string | null; email?: string | null }) {
+  return fetchJson<{ ok?: boolean; member?: MemberView }>('/api/sapo-v2/members', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
 export function fetchSapoChannelContexts(memberIds: number[]) {
   const params = new URLSearchParams({ member_ids: memberIds.join(',') })
   return fetchJson<{

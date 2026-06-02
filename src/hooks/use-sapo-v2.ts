@@ -12,6 +12,7 @@ import {
   fetchSapoDashboard,
   fetchSapoMembers,
   fetchSapoStatus,
+  createSapoExternalMember,
   patchSapoChannels,
   patchSapoMembers,
   postSapoLegacySync,
@@ -105,6 +106,17 @@ export function useSaveMediaToggles() {
   return useMutation({
     mutationFn: (toggles: Array<{ sapo_user_id: number; is_media_team: boolean }>) =>
       patchSapoMembers(toggles),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: sapoV2Keys.all })
+    },
+  })
+}
+
+export function useCreateMediaMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { full_name: string; prefix_code?: string | null; email?: string | null }) =>
+      createSapoExternalMember(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: sapoV2Keys.all })
     },
