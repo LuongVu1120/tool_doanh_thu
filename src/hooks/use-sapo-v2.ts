@@ -8,12 +8,14 @@ import {
 } from '@tanstack/react-query'
 import {
   fetchSapoChannelContexts,
+  fetchSapoChannelAliases,
   fetchSapoChannels,
   fetchSapoDashboard,
   fetchSapoMembers,
   fetchSapoStatus,
   createSapoExternalMember,
   patchSapoChannels,
+  patchSapoChannelAlias,
   patchSapoMembers,
   postSapoLegacySync,
   postSapoV2Sync,
@@ -43,6 +45,15 @@ export function useSapoChannels() {
       return data.channels || []
     },
     staleTime: FIVE_MINUTES,
+  })
+}
+
+export function useSapoChannelAliases(enabled = true) {
+  return useQuery({
+    queryKey: sapoV2Keys.channelAliases('review'),
+    queryFn: () => fetchSapoChannelAliases('review'),
+    staleTime: TWO_MINUTES,
+    enabled,
   })
 }
 
@@ -95,6 +106,22 @@ export function useSaveChannelAssignments() {
   return useMutation({
     mutationFn: (assignments: Array<{ channel_id: string; media_member_id: number | null }>) =>
       patchSapoChannels(assignments),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: sapoV2Keys.all })
+    },
+  })
+}
+
+export function useResolveChannelAlias() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: {
+      alias_id: string
+      channel_id?: string | null
+      owner_member_id?: number | null
+      status?: 'matched' | 'ignored' | 'unmatched' | 'ambiguous'
+      notes?: string | null
+    }) => patchSapoChannelAlias(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: sapoV2Keys.all })
     },

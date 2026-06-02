@@ -1,4 +1,5 @@
 import type {
+  ChannelAliasData,
   ChannelContext,
   ChannelView,
   DashboardData,
@@ -10,6 +11,7 @@ export const sapoV2Keys = {
   all: ['sapo-v2'] as const,
   dashboard: (from: string, to: string) => [...sapoV2Keys.all, 'dashboard', from, to] as const,
   channels: () => [...sapoV2Keys.all, 'channels'] as const,
+  channelAliases: (status: string) => [...sapoV2Keys.all, 'channel-aliases', status] as const,
   members: () => [...sapoV2Keys.all, 'members'] as const,
   channelContexts: (memberIds: string) => [...sapoV2Keys.all, 'channel-contexts', memberIds] as const,
 }
@@ -36,6 +38,10 @@ export function fetchSapoDashboard(from: string, to: string) {
 
 export function fetchSapoChannels() {
   return fetchJson<{ channels: ChannelView[] }>('/api/sapo-v2/channels')
+}
+
+export function fetchSapoChannelAliases(status = 'review') {
+  return fetchJson<ChannelAliasData>(`/api/sapo-v2/channel-aliases?status=${encodeURIComponent(status)}`)
 }
 
 export function fetchSapoMembers() {
@@ -74,6 +80,20 @@ export function patchSapoChannels(assignments: Array<{ channel_id: string; media
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ assignments }),
+  })
+}
+
+export function patchSapoChannelAlias(input: {
+  alias_id: string
+  channel_id?: string | null
+  owner_member_id?: number | null
+  status?: 'matched' | 'ignored' | 'unmatched' | 'ambiguous'
+  notes?: string | null
+}) {
+  return fetchJson<{ ok?: boolean }>('/api/sapo-v2/channel-aliases', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
   })
 }
 

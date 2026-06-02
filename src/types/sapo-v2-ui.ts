@@ -40,6 +40,45 @@ export interface MemberView {
   is_active: boolean
 }
 
+export interface ChannelAliasCandidate {
+  channel_id: string
+  name: string | null
+  alias: string | null
+  platform: string | null
+  external_id: string | null
+  orders_count: number
+}
+
+export interface ChannelAliasReview {
+  id: string
+  alias_text: string
+  normalized_alias: string
+  platform: string | null
+  platform_key: string
+  excel_owner: string | null
+  excel_month: string | null
+  excel_revenue: number
+  channel_id: string | null
+  owner_member_id: number | null
+  source: string
+  confidence: 'exact' | 'manual' | 'fuzzy' | 'review' | 'ignored'
+  status: 'unmatched' | 'ambiguous' | 'matched' | 'ignored'
+  candidates: ChannelAliasCandidate[]
+  notes: string | null
+  updated_at: string | null
+}
+
+export interface ChannelAliasData {
+  aliases: ChannelAliasReview[]
+  channels: Pick<ChannelView, 'id' | 'alias' | 'platform' | 'branch_name' | 'branch_external_id' | 'orders_count'>[]
+  members: Pick<MemberView, 'sapo_user_id' | 'full_name' | 'prefix_code' | 'is_media_team'>[]
+  summary: {
+    total: number
+    unmatched: number
+    ambiguous: number
+  }
+}
+
 export interface DashboardData {
   range: { from: string; to: string }
   sync?: {

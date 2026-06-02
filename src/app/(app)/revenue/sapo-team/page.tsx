@@ -4,8 +4,10 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   useCreateMediaMember,
+  useResolveChannelAlias,
   useSaveChannelAssignments,
   useSaveMediaToggles,
+  useSapoChannelAliases,
   useSapoChannels,
   useSapoDashboard,
   useSapoMembers,
@@ -15,7 +17,7 @@ import {
   fetchSapoChannelContexts,
   sapoV2Keys,
 } from '@/lib/sapo-v2/queries'
-import type { ChannelContext, ChannelView, DashboardData, MemberView } from '@/types/sapo-v2-ui'
+import type { ChannelAliasData, ChannelContext, ChannelView, DashboardData, MemberView } from '@/types/sapo-v2-ui'
 import {
   RefreshCw,
   TrendingUp,
@@ -69,7 +71,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -258,10 +259,12 @@ export default function SapoTeamPage() {
   const dashboardQuery = useSapoDashboard(fromIso, toIso)
   const channelsQuery = useSapoChannels()
   const membersQuery = useSapoMembers()
+  const channelAliasesQuery = useSapoChannelAliases(tab === 'channels')
   const syncMutation = useSapoV2Sync()
   const saveAssignmentsMutation = useSaveChannelAssignments()
   const saveMediaMutation = useSaveMediaToggles()
   const createMediaMemberMutation = useCreateMediaMember()
+  const resolveChannelAliasMutation = useResolveChannelAlias()
 
   const dashboard = dashboardQuery.data ?? null
   const channels = channelsQuery.data ?? EMPTY_CHANNELS
@@ -284,7 +287,11 @@ export default function SapoTeamPage() {
     (channelsQuery.isLoading && !channelsQuery.data) ||
     (membersQuery.isLoading && !membersQuery.data)
   const syncing = syncMutation.isPending
-  const saving = saveAssignmentsMutation.isPending || saveMediaMutation.isPending || createMediaMemberMutation.isPending
+  const saving =
+    saveAssignmentsMutation.isPending ||
+    saveMediaMutation.isPending ||
+    createMediaMemberMutation.isPending ||
+    resolveChannelAliasMutation.isPending
 
   const [actionError, setActionError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -368,6 +375,25 @@ export default function SapoTeamPage() {
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Lỗi không xác định')
       throw e
+    }
+  }
+
+  async function resolveChannelAlias(input: {
+    alias_id: string
+    channel_id: string
+    owner_member_id: number
+    notes?: string | null
+  }) {
+    setActionError(null)
+    setMessage(null)
+    try {
+      await resolveChannelAliasMutation.mutateAsync({
+        ...input,
+        status: 'matched',
+      })
+      setMessage('Đã gán alias Excel vào kênh Sapo và cập nhật người phụ trách kênh. Báo cáo sẽ tính theo mapping mới.')
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Lỗi không xác định')
     }
   }
 
@@ -701,6 +727,7 @@ export default function SapoTeamPage() {
             {tab === 'channels' && (
               <ChannelsTab
                 channels={channels}
+                aliasData={channelAliasesQuery.data}
                 channelContexts={channelContexts}
                 mediaMembers={mediaMembers}
                 allMembers={members}
@@ -714,6 +741,8 @@ export default function SapoTeamPage() {
                 onLoadContexts={loadChannelContexts}
                 onAutoAssign={autoAssignFromOrderHistory}
                 onBulkAssign={bulkAssign}
+                onResolveAlias={resolveChannelAlias}
+                resolvingAlias={resolveChannelAliasMutation.isPending}
               />
             )}
             {tab === 'members' && (
@@ -823,6 +852,173 @@ function PlatformBadge({ platform }: { platform: string }) {
 }
 
 // ===== Tab Components =====
+
+function AliasReviewPanel({
+  aliasData,
+  rows,
+  mediaMembers,
+  memberByPrefix,
+  aliasChannelOptions,
+  aliasChannelSelection,
+  aliasOwnerSelection,
+  aliasSearch,
+  resolvingAlias,
+  onAliasSearchChange,
+  onChannelSelectionChange,
+  onOwnerSelectionChange,
+  onResolveAlias,
+}: {
+  aliasData: ChannelAliasData
+  rows: ChannelAliasData['aliases']
+  mediaMembers: MemberView[]
+  memberByPrefix: Map<string, MemberView>
+  aliasChannelOptions: ChannelAliasData['channels']
+  aliasChannelSelection: Record<string, string>
+  aliasOwnerSelection: Record<string, string>
+  aliasSearch: string
+  resolvingAlias: boolean
+  onAliasSearchChange: (value: string) => void
+  onChannelSelectionChange: (aliasId: string, channelId: string) => void
+  onOwnerSelectionChange: (aliasId: string, ownerId: string) => void
+  onResolveAlias: (input: { alias_id: string; channel_id: string; owner_member_id: number; notes?: string | null }) => Promise<void>
+}) {
+  return (
+    <div className="border-b border-amber-200 bg-amber-50/70 px-5 py-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+      <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sm font-extrabold text-amber-800 dark:text-amber-200">
+            <AlertTriangle className="h-4 w-4" />
+            Kênh trong Excel chưa khớp Sapo
+            <Badge className="border-0 bg-amber-500 text-white">
+              {aliasData.summary.unmatched + aliasData.summary.ambiguous}
+            </Badge>
+          </div>
+          <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
+            Gán từng tên kênh Excel vào đúng kênh Sapo và member Media. Sau khi gán, kênh đó sẽ được tính vào báo cáo doanh thu.
+          </p>
+        </div>
+        <div className="relative w-full lg:w-[320px]">
+          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-amber-600/70" />
+          <Input
+            value={aliasSearch}
+            onChange={(e) => onAliasSearchChange(e.target.value)}
+            placeholder="Lọc alias, owner, nền tảng..."
+            className="h-9 rounded-lg border-amber-300 bg-white pl-8 text-xs"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {rows.map((row) => {
+          const ownerHint = row.owner_member_id
+            ? mediaMembers.find((m) => m.sapo_user_id === row.owner_member_id)
+            : memberByPrefix.get((row.excel_owner || '').trim().toLowerCase())
+          const selectedChannelId = aliasChannelSelection[row.id] || row.channel_id || ''
+          const selectedOwnerId = aliasOwnerSelection[row.id] || (ownerHint ? String(ownerHint.sapo_user_id) : '')
+          const canResolve = Boolean(selectedChannelId && selectedOwnerId)
+          const candidateLabels = (row.candidates || [])
+            .slice(0, 3)
+            .map((c) => `${c.name || c.alias || c.channel_id}${c.orders_count ? ` (${c.orders_count.toLocaleString('vi-VN')} đơn)` : ''}`)
+            .join(', ')
+
+          return (
+            <div
+              key={row.id}
+              className="grid gap-2 rounded-xl border border-amber-200 bg-white p-3 shadow-sm dark:border-amber-900/50 dark:bg-slate-950/70 lg:grid-cols-[minmax(260px,1fr)_260px_240px_auto]"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-extrabold text-slate-900 dark:text-white" title={row.alias_text}>
+                    {row.alias_text}
+                  </span>
+                  {row.platform && <PlatformBadge platform={row.platform} />}
+                  <Badge variant="outline" className="text-[10px] font-bold">
+                    {row.status === 'ambiguous' ? 'Cần chọn lại' : 'Chưa tìm thấy'}
+                  </Badge>
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Excel: {row.excel_owner || 'chưa rõ owner'} · {row.excel_month || 'chưa rõ tháng'} · {formatMoney(Number(row.excel_revenue || 0))}
+                </div>
+                {candidateLabels && (
+                  <div className="mt-1 truncate text-[11px] text-amber-700 dark:text-amber-300" title={candidateLabels}>
+                    Gợi ý: {candidateLabels}
+                  </div>
+                )}
+              </div>
+
+              <Select
+                value={selectedChannelId || undefined}
+                onValueChange={(value) => onChannelSelectionChange(row.id, value || '')}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg border-amber-300 bg-white">
+                  <SelectValue placeholder="Chọn kênh Sapo" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[360px] max-w-[420px] overflow-y-auto">
+                  {aliasChannelOptions.map((channel) => (
+                    <SelectItem key={channel.id} value={channel.id}>
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold">
+                          {channel.branch_name || channel.alias || channel.id}
+                        </div>
+                        <div className="truncate text-[10px] text-slate-400">
+                          {channel.platform} · {channel.branch_external_id || 'no-id'} · {channel.orders_count.toLocaleString('vi-VN')} đơn
+                        </div>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={selectedOwnerId || undefined}
+                onValueChange={(value) => onOwnerSelectionChange(row.id, value || '')}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg border-amber-300 bg-white">
+                  <SelectValue placeholder="Chọn member Media" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[360px] max-w-[360px] overflow-y-auto">
+                  {mediaMembers.map((member) => (
+                    <SelectItem key={member.sapo_user_id} value={String(member.sapo_user_id)}>
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold">{member.full_name || `#${member.sapo_user_id}`}</div>
+                        <div className="truncate text-[10px] text-slate-400">
+                          {member.prefix_code || 'no-prefix'}
+                        </div>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button
+                type="button"
+                size="sm"
+                disabled={!canResolve || resolvingAlias}
+                onClick={() =>
+                  void onResolveAlias({
+                    alias_id: row.id,
+                    channel_id: selectedChannelId,
+                    owner_member_id: Number(selectedOwnerId),
+                    notes: row.notes,
+                  })
+                }
+                className="h-9 rounded-lg bg-amber-600 px-4 text-xs font-extrabold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50"
+              >
+                {resolvingAlias ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}
+                Xác nhận
+              </Button>
+            </div>
+          )
+        })}
+        {rows.length === 0 && (
+          <div className="rounded-lg border border-amber-200 bg-white px-3 py-4 text-center text-xs text-slate-500">
+            Không còn alias phù hợp với bộ lọc.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function OverviewTab({ data }: { data: DashboardData }) {
   const [channelSearch, setChannelSearch] = useState('')
@@ -1365,6 +1561,7 @@ function MonthlyTab({ data }: { data: DashboardData }) {
 
 function ChannelsTab({
   channels,
+  aliasData,
   channelContexts,
   mediaMembers,
   allMembers,
@@ -1378,8 +1575,11 @@ function ChannelsTab({
   onLoadContexts,
   onAutoAssign,
   onBulkAssign,
+  onResolveAlias,
+  resolvingAlias,
 }: {
   channels: ChannelView[]
+  aliasData?: ChannelAliasData
   channelContexts: Record<string, ChannelContext>
   mediaMembers: MemberView[]
   allMembers: MemberView[]
@@ -1393,6 +1593,8 @@ function ChannelsTab({
   onLoadContexts: () => Promise<Record<string, ChannelContext>>
   onAutoAssign: (opts?: { onlyEmpty?: boolean }) => Promise<void>
   onBulkAssign: (channelIds: string[], mediaMemberId: number | null) => void
+  onResolveAlias: (input: { alias_id: string; channel_id: string; owner_member_id: number; notes?: string | null }) => Promise<void>
+  resolvingAlias: boolean
 }) {
   const pendingCount = Object.keys(pending).length
   const [search, setSearch] = useState('')
@@ -1402,6 +1604,9 @@ function ChannelsTab({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkTarget, setBulkTarget] = useState<string>('__none__')
   const [memberSelectSearch, setMemberSelectSearch] = useState('')
+  const [aliasChannelSelection, setAliasChannelSelection] = useState<Record<string, string>>({})
+  const [aliasOwnerSelection, setAliasOwnerSelection] = useState<Record<string, string>>({})
+  const [aliasSearch, setAliasSearch] = useState('')
 
   // Danh sách trong dropdown:
   // - Nếu đã có Media team: chỉ Media team (gọn, đúng người)
@@ -1453,6 +1658,34 @@ function ChannelsTab({
     () => new Map(allMembers.map((m) => [m.sapo_user_id, m])),
     [allMembers]
   )
+  const memberByPrefix = useMemo(() => {
+    const map = new Map<string, MemberView>()
+    for (const member of mediaMembers) {
+      const key = (member.prefix_code || member.full_name || '').trim().toLowerCase()
+      if (key && !map.has(key)) map.set(key, member)
+      const nameKey = (member.full_name || '').trim().toLowerCase()
+      if (nameKey && !map.has(nameKey)) map.set(nameKey, member)
+    }
+    return map
+  }, [mediaMembers])
+
+  const aliasReviewRows = useMemo(() => {
+    const rows = aliasData?.aliases || []
+    const query = aliasSearch.trim().toLowerCase()
+    const filtered = query
+      ? rows.filter((row) =>
+          row.alias_text.toLowerCase().includes(query) ||
+          (row.excel_owner || '').toLowerCase().includes(query) ||
+          (row.platform || '').toLowerCase().includes(query) ||
+          (row.notes || '').toLowerCase().includes(query)
+        )
+      : rows
+    return filtered.slice(0, 12)
+  }, [aliasData?.aliases, aliasSearch])
+
+  const aliasChannelOptions = useMemo(() => {
+    return aliasData?.channels || channels
+  }, [aliasData?.channels, channels])
 
   const allFilteredSelected = filteredChannels.length > 0 && filteredChannels.every((c) => selectedIds.has(c.id))
   const hasContexts = Object.keys(channelContexts).length > 0
@@ -1655,6 +1888,27 @@ function ChannelsTab({
         </div>
       </CardHeader>
       <CardContent className="p-0">
+        {aliasData && aliasData.aliases.length > 0 && (
+          <AliasReviewPanel
+            aliasData={aliasData}
+            rows={aliasReviewRows}
+            mediaMembers={mediaMembers}
+            memberByPrefix={memberByPrefix}
+            aliasChannelOptions={aliasChannelOptions}
+            aliasChannelSelection={aliasChannelSelection}
+            aliasOwnerSelection={aliasOwnerSelection}
+            aliasSearch={aliasSearch}
+            resolvingAlias={resolvingAlias}
+            onAliasSearchChange={setAliasSearch}
+            onChannelSelectionChange={(aliasId, channelId) =>
+              setAliasChannelSelection((prev) => ({ ...prev, [aliasId]: channelId }))
+            }
+            onOwnerSelectionChange={(aliasId, ownerId) =>
+              setAliasOwnerSelection((prev) => ({ ...prev, [aliasId]: ownerId }))
+            }
+            onResolveAlias={onResolveAlias}
+          />
+        )}
         {/* Brand quick-picker: gom các kênh theo thương hiệu để chọn nhanh */}
         {brandStats.length > 0 && (
           <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40">
@@ -2118,57 +2372,61 @@ function MembersTab({
         </div>
 
         <Dialog open={createMemberOpen} onOpenChange={setCreateMemberOpen}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Tạo nhân sự Media ngoài Sapo</DialogTitle>
-              <DialogDescription>
+          <DialogContent className="overflow-hidden border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl shadow-slate-950/20 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 sm:max-w-[520px]">
+            <DialogHeader className="border-b border-slate-100 bg-slate-50/80 px-5 py-4 pr-12 dark:border-slate-800 dark:bg-slate-900/70">
+              <DialogTitle className="text-base font-bold text-slate-900 dark:text-white">
+                Tạo nhân sự Media ngoài Sapo
+              </DialogTitle>
+              <DialogDescription className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                 Nhân sự này là member nội bộ, không liên kết tài khoản Sapo/Gmail. Sau khi tạo, gán member vào kênh để doanh thu chuyển sang người đó.
               </DialogDescription>
             </DialogHeader>
             <form
-              className="space-y-4"
+              className="space-y-0"
               onSubmit={(e) => {
                 e.preventDefault()
                 void addExternalMemberToMedia()
               }}
             >
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                  Tên nhân sự <span className="text-rose-500">*</span>
-                </label>
-                <Input
-                  autoFocus
-                  value={newMemberName}
-                  onChange={(e) => setNewMemberName(e.target.value)}
-                  placeholder="Ví dụ: Media Nguyễn Văn A"
-                  className="h-10 rounded-lg"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-4 px-5 py-5">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                    Mã đội / prefix
+                    Tên nhân sự <span className="text-rose-500">*</span>
                   </label>
                   <Input
-                    value={newMemberPrefix}
-                    onChange={(e) => setNewMemberPrefix(e.target.value)}
-                    placeholder="Ví dụ: AN, VÂN, ADS..."
-                    className="h-10 rounded-lg"
+                    autoFocus
+                    value={newMemberName}
+                    onChange={(e) => setNewMemberName(e.target.value)}
+                    placeholder="Ví dụ: Media Nguyễn Văn A"
+                    className="h-10 rounded-lg bg-white dark:bg-slate-900"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                    Email ghi chú
-                  </label>
-                  <Input
-                    value={newMemberEmail}
-                    onChange={(e) => setNewMemberEmail(e.target.value)}
-                    placeholder="Không bắt buộc"
-                    className="h-10 rounded-lg"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                      Mã đội / prefix
+                    </label>
+                    <Input
+                      value={newMemberPrefix}
+                      onChange={(e) => setNewMemberPrefix(e.target.value)}
+                      placeholder="Ví dụ: AN, VÂN, ADS..."
+                      className="h-10 rounded-lg bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                      Email ghi chú
+                    </label>
+                    <Input
+                      value={newMemberEmail}
+                      onChange={(e) => setNewMemberEmail(e.target.value)}
+                      placeholder="Không bắt buộc"
+                      className="h-10 rounded-lg bg-white dark:bg-slate-900"
+                    />
+                  </div>
                 </div>
               </div>
-              <DialogFooter className="mt-2">
+              <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/70 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
@@ -2186,7 +2444,7 @@ function MembersTab({
                   {creatingMember && <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
                   Tạo Media
                 </Button>
-              </DialogFooter>
+              </div>
             </form>
           </DialogContent>
         </Dialog>

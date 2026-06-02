@@ -21,12 +21,25 @@ import XLSX from 'xlsx'
 const APPLY = process.argv.includes('--apply')
 const OVERWRITE = !process.argv.includes('--no-overwrite')
 const CLEAR_SAPO_MEDIA = !process.argv.includes('--keep-sapo-media')
-const filePath = readArg('--file') || 'C:/Users/vudai/Downloads/BC Doanh thu theo nhóm VCB 2026 (1).xlsx'
+const UPSERT_ALIAS_REVIEW = !process.argv.includes('--no-alias-review')
+const filePath = resolveWorkbookPath(readArg('--file'))
 
 function readArg(name) {
   const idx = process.argv.indexOf(name)
   if (idx < 0) return null
   return process.argv[idx + 1] || null
+}
+
+function resolveWorkbookPath(input) {
+  if (input && fs.existsSync(input)) return input
+  const downloads = 'C:/Users/vudai/Downloads'
+  if (fs.existsSync(downloads)) {
+    const fileName = fs
+      .readdirSync(downloads)
+      .find((name) => name.startsWith('BC Doanh thu theo') && name.includes('VCB 2026') && name.endsWith('.xlsx'))
+    if (fileName) return path.join(downloads, fileName)
+  }
+  return input || 'C:/Users/vudai/Downloads/BC Doanh thu theo nh?m VCB 2026 (1).xlsx'
 }
 
 function loadEnv() {
@@ -45,6 +58,8 @@ function normalize(value) {
   return String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D')
     .toLowerCase()
@@ -82,9 +97,10 @@ function parseMoney(value) {
 }
 
 function parseMonthKey(sheetName) {
-  const m2026 = /^Tổng(\d{1,2})\.26$/i.exec(sheetName)
+  const key = compact(sheetName)
+  const m2026 = /^tong(\d{1,2})26$/i.exec(key)
   if (m2026) return `2026-${String(Number(m2026[1])).padStart(2, '0')}`
-  const m2025 = /^Tổng(\d{1,2})$/i.exec(sheetName)
+  const m2025 = /^tong(\d{1,2})$/i.exec(key)
   if (m2025) return `2025-${String(Number(m2025[1])).padStart(2, '0')}`
   return null
 }
@@ -204,7 +220,28 @@ function filterPlatform(candidates, platform) {
   return exact
 }
 
-function matchChannel(row, indexes) {
+function aliasLookupKeys(row) {
+  const keys = new Set()
+  for (const key of channelNameKeys(row.channelName)) keys.add(`${row.platform || ''}|${key}`)
+  for (const key of channelNameKeys(row.channelRef)) keys.add(`${row.platform || ''}|${key}`)
+  for (const key of channelNameKeys(row.channelName)) keys.add(`|${key}`)
+  for (const key of channelNameKeys(row.channelRef)) keys.add(`|${key}`)
+  return [...keys].filter((key) => !key.endsWith('|'))
+}
+
+function matchChannel(row, indexes, confirmedAliasByKey = new Map(), channelById = new Map()) {
+  for (const key of aliasLookupKeys(row)) {
+    const alias = confirmedAliasByKey.get(key)
+    const channel = alias?.channel_id ? channelById.get(alias.channel_id) : null
+    if (channel) {
+      return {
+        channels: [channel],
+        strategy: `alias:${alias.alias_text}`,
+        alias,
+      }
+    }
+  }
+
   for (const extId of row.externalIds) {
     const candidates = filterPlatform(indexes.byExtId.get(extId) || [], row.platform)
     if (candidates.length === 1) return { channels: candidates, strategy: `external_id:${extId}` }
@@ -227,6 +264,35 @@ function displayChannel(channel) {
   return `${channel.branch_name || channel.alias || channel.id} [${channel.platform}] ${channel.branch_external_id || ''}`.trim()
 }
 
+function aliasUniqueKey(row) {
+  return `excel_2026|${row.platform || ''}|${normalize(row.channelName)}`
+}
+
+function aliasReviewRow(row, status, match) {
+  return {
+    alias_text: row.channelName,
+    normalized_alias: normalize(row.channelName),
+    platform: row.platform,
+    platform_key: row.platform || '',
+    excel_owner: row.owner,
+    excel_month: row.month,
+    excel_revenue: row.revenue,
+    owner_member_id: row.memberId,
+    source: 'excel_2026',
+    confidence: 'review',
+    status,
+    candidates: (match.candidates || []).slice(0, 12).map((channel) => ({
+      channel_id: channel.id,
+      name: channel.branch_name || channel.alias || channel.id,
+      alias: channel.alias,
+      platform: channel.platform,
+      external_id: channel.branch_external_id,
+      orders_count: channel.orders_count || 0,
+    })),
+    notes: row.channelRef || null,
+  }
+}
+
 const env = loadEnv()
 const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY)
 
@@ -236,6 +302,12 @@ const { data: channels, error: channelError } = await supabase
   .select('id, alias, branch_name, branch_external_id, platform, main_name, sub_name, orders_count, media_member_id')
 
 if (channelError) throw new Error(channelError.message)
+
+const { data: aliasRows, error: aliasError } = await supabase
+  .from('sapo_channel_aliases')
+  .select('id, alias_text, normalized_alias, platform, platform_key, channel_id, owner_member_id, status')
+
+if (aliasError) throw new Error(`load channel aliases: ${aliasError.message}`)
 
 const { data: existingMembers, error: memberError } = await supabase
   .from('sapo_members')
@@ -256,13 +328,25 @@ for (const member of existingMembers || []) {
 }
 
 const indexes = buildChannelIndexes(channels || [])
+const channelById = new Map((channels || []).map((c) => [c.id, c]))
+const confirmedAliasByKey = new Map()
+const existingAliasByKey = new Map()
+for (const alias of aliasRows || []) {
+  existingAliasByKey.set(`excel_2026|${alias.platform_key || alias.platform || ''}|${alias.normalized_alias}`, alias)
+  if (alias.source && alias.source !== 'excel_2026') {
+    existingAliasByKey.set(`${alias.source}|${alias.platform_key || alias.platform || ''}|${alias.normalized_alias}`, alias)
+  }
+  if (alias.status !== 'matched' || !alias.channel_id) continue
+  confirmedAliasByKey.set(`${alias.platform_key || alias.platform || ''}|${alias.normalized_alias}`, alias)
+}
 const owners = new Map()
 const assignments = []
 const unmatched = []
 const ambiguous = []
+const aliasReviewRows = []
 
 for (const row of mappings) {
-  const match = matchChannel(row, indexes)
+  const match = matchChannel(row, indexes, confirmedAliasByKey, channelById)
   const hint = memberHintByOwner.get(row.ownerKey)
   if (!owners.has(row.ownerKey)) {
     owners.set(row.ownerKey, {
@@ -277,6 +361,7 @@ for (const row of mappings) {
 
   if (!match.channels || match.channels.length === 0) {
     const target = match.strategy.startsWith('ambiguous') ? ambiguous : unmatched
+    const status = match.strategy.startsWith('ambiguous') ? 'ambiguous' : 'unmatched'
     target.push({
       owner: row.owner,
       channelName: row.channelName,
@@ -284,6 +369,10 @@ for (const row of mappings) {
       strategy: match.strategy,
       candidates: (match.candidates || []).map(displayChannel),
     })
+    const existingAlias = existingAliasByKey.get(aliasUniqueKey(row))
+    if (!existingAlias || !['matched', 'ignored'].includes(existingAlias.status)) {
+      aliasReviewRows.push(aliasReviewRow(row, status, match))
+    }
     continue
   }
 
@@ -291,6 +380,7 @@ for (const row of mappings) {
   for (const channel of match.channels) {
     assignments.push({
       ...row,
+      memberId: match.alias?.owner_member_id ?? row.memberId,
       channel,
       strategy: match.strategy,
     })
@@ -330,6 +420,7 @@ console.log(`Owners: ${ownerRows.length}`)
 console.log(`Matched channel assignments: ${finalAssignments.length}`)
 console.log(`Unmatched: ${unmatched.length}`)
 console.log(`Ambiguous: ${ambiguous.length}`)
+console.log(`Alias review rows: ${aliasReviewRows.length}`)
 console.log(`Mode: ${APPLY ? 'APPLY' : 'DRY-RUN'}`)
 console.log(`Clear positive Sapo media flags: ${CLEAR_SAPO_MEDIA}`)
 console.log(`Overwrite existing channel assignments: ${OVERWRITE}`)
@@ -388,9 +479,22 @@ for (const assignment of finalAssignments) {
   updated++
 }
 
+let aliasReviewUpserted = 0
+if (UPSERT_ALIAS_REVIEW && aliasReviewRows.length > 0) {
+  for (let i = 0; i < aliasReviewRows.length; i += 200) {
+    const batch = aliasReviewRows.slice(i, i + 200)
+    const { error } = await supabase
+      .from('sapo_channel_aliases')
+      .upsert(batch, { onConflict: 'source,normalized_alias,platform_key' })
+    if (error) throw new Error(`upsert channel alias review rows: ${error.message}`)
+    aliasReviewUpserted += batch.length
+  }
+}
+
 console.log('\n=== APPLIED ===')
 console.log(`Excel media members upserted: ${ownerRows.length}`)
 console.log(`Channel assignments updated: ${updated}`)
 console.log(`Channel assignments skipped: ${skipped}`)
+console.log(`Alias review rows upserted: ${aliasReviewUpserted}`)
 console.log(`Unmatched still needs review: ${unmatched.length}`)
 console.log(`Ambiguous still needs review: ${ambiguous.length}`)
