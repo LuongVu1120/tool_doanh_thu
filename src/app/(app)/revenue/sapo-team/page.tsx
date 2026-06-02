@@ -65,6 +65,14 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 // ===== Types =====
 // ChannelView, MemberView, DashboardData, ChannelContext imported from @/types/sapo-v2-ui
@@ -1975,6 +1983,7 @@ function MembersTab({
   const [newMemberPrefix, setNewMemberPrefix] = useState('')
   const [newMemberEmail, setNewMemberEmail] = useState('')
   const [creatingMember, setCreatingMember] = useState(false)
+  const [createMemberOpen, setCreateMemberOpen] = useState(false)
   // Mặc định: hiện nhân viên Media (đã đánh dấu hoặc gợi ý) để user không bị rối
   const initialFilter: 'all' | 'media' | 'suggested' | 'non_media' = useMemo(() => {
     const anyMedia = members.some((m) => m.is_media_team)
@@ -2026,6 +2035,7 @@ function MembersTab({
       setNewMemberPrefix('')
       setNewMemberEmail('')
       setStatusFilter('media')
+      setCreateMemberOpen(false)
     } finally {
       setCreatingMember(false)
     }
@@ -2084,52 +2094,102 @@ function MembersTab({
             </p>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 p-3">
-            <div className="flex flex-col xl:flex-row xl:items-end gap-2">
-              <div className="flex-1 space-y-1">
-                <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                  Tạo nhân sự Media ngoài Sapo
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-[1.2fr_0.7fr] gap-2">
-                  <Input
-                    value={newMemberName}
-                    onChange={(e) => setNewMemberName(e.target.value)}
-                    placeholder="Tên nhân sự, ví dụ: Media Nguyễn Văn A"
-                    className="h-9 rounded-lg bg-white dark:bg-slate-900"
-                  />
-                  <Input
-                    value={newMemberPrefix}
-                    onChange={(e) => setNewMemberPrefix(e.target.value)}
-                    placeholder="Mã đội / prefix"
-                    className="h-9 rounded-lg bg-white dark:bg-slate-900"
-                  />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                  Nhân sự ngoài Sapo
                 </div>
-                <Input
-                  value={newMemberEmail}
-                  onChange={(e) => setNewMemberEmail(e.target.value)}
-                  placeholder="Email ghi chú (không bắt buộc)"
-                  className="h-9 rounded-lg bg-white dark:bg-slate-900"
-                />
+                <p className="text-xs text-slate-500">
+                  Tạo member nội bộ cho người không có tài khoản Sapo riêng, rồi gán vào kênh để tính doanh thu.
+                </p>
               </div>
               <Button
                 type="button"
                 size="sm"
                 className="h-9 rounded-lg font-bold bg-emerald-600 text-white shadow-sm shadow-emerald-600/20 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:bg-emerald-500 dark:hover:bg-emerald-600"
-                disabled={!newMemberName.trim() || creatingMember || saving}
-                onClick={addExternalMemberToMedia}
+                disabled={creatingMember || saving}
+                onClick={() => setCreateMemberOpen(true)}
               >
-                {creatingMember ? (
-                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <Users className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Tạo Media
+                <Users className="h-3.5 w-3.5 mr-1.5" />
+                Tạo nhân sự Media
               </Button>
             </div>
-            <p className="mt-2 text-[11px] text-slate-500">
-              Nhân sự tạo mới là member nội bộ, không liên kết tài khoản Sapo/Gmail. Sau khi tạo, gán người này vào kênh để doanh thu chuyển sang member đó.
-            </p>
           </div>
         </div>
+
+        <Dialog open={createMemberOpen} onOpenChange={setCreateMemberOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Tạo nhân sự Media ngoài Sapo</DialogTitle>
+              <DialogDescription>
+                Nhân sự này là member nội bộ, không liên kết tài khoản Sapo/Gmail. Sau khi tạo, gán member vào kênh để doanh thu chuyển sang người đó.
+              </DialogDescription>
+            </DialogHeader>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void addExternalMemberToMedia()
+              }}
+            >
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                  Tên nhân sự <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  autoFocus
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  placeholder="Ví dụ: Media Nguyễn Văn A"
+                  className="h-10 rounded-lg"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    Mã đội / prefix
+                  </label>
+                  <Input
+                    value={newMemberPrefix}
+                    onChange={(e) => setNewMemberPrefix(e.target.value)}
+                    placeholder="Ví dụ: AN, VÂN, ADS..."
+                    className="h-10 rounded-lg"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    Email ghi chú
+                  </label>
+                  <Input
+                    value={newMemberEmail}
+                    onChange={(e) => setNewMemberEmail(e.target.value)}
+                    placeholder="Không bắt buộc"
+                    className="h-10 rounded-lg"
+                  />
+                </div>
+              </div>
+              <DialogFooter className="mt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-lg"
+                  disabled={creatingMember}
+                  onClick={() => setCreateMemberOpen(false)}
+                >
+                  Hủy
+                </Button>
+                <Button
+                  type="submit"
+                  className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                  disabled={!newMemberName.trim() || creatingMember}
+                >
+                  {creatingMember && <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                  Tạo Media
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         {/* Realtime filters */}
         <div className="flex flex-col sm:flex-row gap-3">
